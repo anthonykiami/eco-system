@@ -57,6 +57,7 @@ export default async function SchedulesPage({ searchParams }: PageProps<"/settin
   ]);
   const timezone = user?.timezone ?? session.user.timezone;
   const error = typeof params.error === "string" ? ERRORS[params.error] : undefined;
+  const queued = params.queued === "1";
   const formatRun = (date: Date) =>
     date.toLocaleString("en-US", { timeZone: timezone, dateStyle: "medium", timeStyle: "short" });
 
@@ -79,6 +80,12 @@ export default async function SchedulesPage({ searchParams }: PageProps<"/settin
       </div>
 
       {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
+      {queued && (
+        <p role="status" className="text-sm text-green-600">
+          Queued. It runs at the next check, within about 5 minutes, and a briefing can take a minute
+          or two to write.
+        </p>
+      )}
 
       {jobs.length > 0 && (
         <ul className="flex flex-col gap-3">

@@ -16,7 +16,9 @@ export async function verifyQStashRequest(req: Request, path: string): Promise<s
       url: new URL(path, env.APP_URL).toString(),
     });
     return valid ? body : null;
-  } catch {
+  } catch (err) {
+    // Usually APP_URL not matching the URL QStash called, or stale signing keys.
+    console.warn(`[qstash] rejected request to ${path}`, err instanceof Error ? err.message : err);
     return null;
   }
 }

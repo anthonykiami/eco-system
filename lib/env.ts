@@ -77,6 +77,12 @@ function parseEnv(): Env {
       .join("\n");
     throw new Error(`Invalid environment variables:\n${issues}\nSee .env.example.`);
   }
+  // QStash signatures and OAuth callbacks are tied to APP_URL; a local value in production
+  // silently breaks every scheduled task, so fail the deploy instead.
+  const { hostname } = new URL(result.data.APP_URL);
+  if (process.env.VERCEL_ENV === "production" && ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname)) {
+    throw new Error(`APP_URL is ${result.data.APP_URL} in production. Set it to the public URL, e.g. https://your-app.vercel.app.`);
+  }
   return result.data;
 }
 

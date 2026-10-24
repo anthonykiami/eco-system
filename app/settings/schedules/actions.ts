@@ -55,7 +55,8 @@ export async function changeJob(formData: FormData) {
       break;
     case "run":
       await runUserJobNow(userId, jobId);
-      break;
+      revalidatePath(SETTINGS_PATH);
+      redirect(`${SETTINGS_PATH}?queued=1`);
     case "delete":
       await deleteUserJob(userId, jobId);
       break;
