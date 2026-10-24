@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import * as q from "@/lib/db/queries";
 import { getUser } from "@/lib/db/queries";
 import { users, type UserStatus } from "@/lib/db/schema";
+import { env } from "@/lib/env";
 import { createLinkCode } from "@/lib/telegram/linking";
 import * as msg from "@/lib/telegram/messages";
 import type { TelegramUpdate } from "@/lib/telegram/types";
@@ -955,5 +956,139 @@ describe("account commands", () => {
 
     expect(calls("setMyCommands")).toHaveLength(1);
     expect(lastSent(chatId)).toBe(msg.HELP);
+  });
+});
+
+describe("photos and voice messages", () => {
+  const FILE_BYTES = new Uint8Array([1, 2, 3]);
+  let transcript = "remind me what's on today";
+  const groqCalls = () => fetchMock.mock.calls.filter(([url]) => url.includes("api.groq.com"));
+
+  beforeEach(() => {
+    transcript = "remind me what's on today";
+    fetchMock.mockImplementation(async (url, init) => {
+      if (url.endsWith("/getFile")) {
+        const { file_id } = JSON.parse(String(init.body)) as { file_id: string };
+        return Response.json({ ok: true, result: { file_path: `files/${file_id}` } });
+      }
+      if (url.includes("/file/bot")) return new Response(FILE_BYTES);
+      if (url.includes("api.groq.com")) return Response.json({ text: transcript });
+      return okResponse(url);
+    });
+  });
+  afterEach(() => {
+    fetchMock.mockImplementation(okResponse);
+  });
+
+  const update = (chatId: number, message: Record<string, unknown>): TelegramUpdate =>
+    ({
+      update_id: nextUpdateId++,
+      message: { message_id: 1, chat: { id: chatId, type: "private" }, ...message },
+    }) as TelegramUpdate;
+  const sizes = [
+    { file_id: "small", width: 90, height: 67 },
+    { file_id: "medium", width: 1280, height: 960 },
+    { file_id: "huge", width: 2560, height: 1920 },
+  ];
+
+  it("sends a photo and its caption to the agent, at the largest size Claude uses in full", async () => {
+    const chatId = nextChatId++;
+    await seedUser({ telegramChatId: chatId });
+
+    await post(update(chatId, { photo: sizes, caption: "what is this plant?" }));
+
+    expect(calls("getFile")).toEqual([{ file_id: "medium" }]);
+    expect(runAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "what is this plant?",
+        images: [{ data: FILE_BYTES, mediaType: "image/jpeg" }],
+      }),
+    );
+    expect(lastSent(chatId)).toBe("echo: what is this plant?");
+  });
+
+  it("a photo captioned with just @name goes to that agent instead of switching to it", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await q.ensurePrimaryAgent(user.id);
+    const coach = await q.createAgent(user.id, { name: "Coach", soul: "You coach." });
+
+    await post(update(chatId, { photo: sizes, caption: "@coach" }));
+
+    const chat = await q.getChat(user.id, runAgentMock.mock.calls[0][0].chatId!);
+    expect(chat?.agentId).toBe(coach.id);
+    expect(runAgentMock.mock.calls[0][0]).toMatchObject({ message: "", images: [expect.anything()] });
+  });
+
+  it("transcribes a voice message, tells the agent it was spoken, and shows what was heard", async () => {
+    const chatId = nextChatId++;
+    await seedUser({ telegramChatId: chatId });
+
+    await post(update(chatId, { voice: { file_id: "v1", duration: 4, mime_type: "audio/ogg" } }));
+
+    const [[url, init]] = groqCalls();
+    expect(url).toBe("https://api.groq.com/openai/v1/audio/transcriptions");
+    expect((init.headers as Record<string, string>).authorization).toBe("Bearer test");
+    const form = init.body as FormData;
+    expect(form.get("model")).toBe("whisper-large-v3-turbo");
+    expect((form.get("file") as File).name).toBe("voice.ogg");
+    expect(runAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "[Voice message, transcribed] remind me what's on today" }),
+    );
+    expect(lastSent(chatId)).toBe(
+      "🎙 <i>remind me what's on today</i>\n\necho: [Voice message, transcribed] remind me what's on today",
+    );
+  });
+
+  it("a voice message answers a setup question like typed text would", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await q.ensurePrimaryAgent(user.id);
+    await post(textUpdate(chatId, "/newagent"));
+    transcript = "Travel Planner";
+
+    await post(update(chatId, { voice: { file_id: "v2", duration: 2 } }));
+
+    expect(lastSent(chatId)).toContain("What should <b>Travel Planner</b> do?");
+    expect(runAgentMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses long recordings and empty ones, and says so when voice isn't set up", async () => {
+    const chatId = nextChatId++;
+    await seedUser({ telegramChatId: chatId });
+
+    await post(update(chatId, { voice: { file_id: "long", duration: 11 * 60 } }));
+    expect(lastSent(chatId)).toBe(msg.voiceProblem("too_long"));
+    expect(groqCalls()).toHaveLength(0);
+
+    transcript = "  ";
+    await post(update(chatId, { voice: { file_id: "silence", duration: 3 } }));
+    expect(lastSent(chatId)).toBe(msg.voiceProblem("empty"));
+
+    const key = env.GROQ_API_KEY;
+    env.GROQ_API_KEY = undefined;
+    try {
+      await post(update(chatId, { voice: { file_id: "v3", duration: 3 } }));
+      expect(lastSent(chatId)).toBe(msg.voiceProblem("unavailable"));
+    } finally {
+      env.GROQ_API_KEY = key;
+    }
+    expect(runAgentMock).not.toHaveBeenCalled();
+  });
+
+  it("explains that videos and other files aren't supported, but reads image files", async () => {
+    const chatId = nextChatId++;
+    await seedUser({ telegramChatId: chatId });
+
+    await post(update(chatId, { video: { file_id: "vid", duration: 30 } }));
+    expect(lastSent(chatId)).toBe(msg.VIDEO_UNSUPPORTED);
+    await post(update(chatId, { document: { file_id: "doc", mime_type: "application/pdf" } }));
+    expect(lastSent(chatId)).toBe(msg.FILE_UNSUPPORTED);
+    expect(runAgentMock).not.toHaveBeenCalled();
+
+    await post(update(chatId, { document: { file_id: "png", mime_type: "image/png", file_size: 1000 } }));
+    expect(runAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ images: [{ data: FILE_BYTES, mediaType: "image/png" }] }),
+    );
   });
 });

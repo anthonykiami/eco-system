@@ -16,6 +16,7 @@ const testEnv: Record<string, string> = {
   ANTHROPIC_API_KEY: "test",
   COMPOSIO_API_KEY: "test",
   SUPERMEMORY_API_KEY: "test",
+  GROQ_API_KEY: "test",
   TELEGRAM_BOT_TOKEN: "test",
   TELEGRAM_BOT_USERNAME: "test_bot",
   TELEGRAM_WEBHOOK_SECRET: "test-secret",

@@ -48,6 +48,8 @@ export const envSchema = z.object({
   ANTHROPIC_API_KEY: nonEmpty,
   COMPOSIO_API_KEY: nonEmpty,
   SUPERMEMORY_API_KEY: nonEmpty,
+  /** Transcribes Telegram voice messages. Without it, the bot says voice isn't available. */
+  GROQ_API_KEY: nonEmpty.optional(),
 
   // Telegram
   TELEGRAM_BOT_TOKEN: nonEmpty,

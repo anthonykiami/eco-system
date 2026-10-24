@@ -5,6 +5,9 @@
 
 export type AgentChannel = "web" | "telegram" | "scheduled";
 
+/** Formats Claude reads; at most 5 MB each. */
+export type AgentImage = { data: Uint8Array; mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp" };
+
 export interface RunAgentInput {
   userId: string;
   /** Continue an existing chat. Omit to use/create the default chat for the agent + channel. */
@@ -12,6 +15,8 @@ export interface RunAgentInput {
   /** Defaults to the user's primary agent. */
   agentId?: string;
   message: string;
+  /** Photos the user sent with this message. The model sees them this turn; history keeps a note. */
+  images?: AgentImage[];
   channel: AgentChannel;
   /** Called when the primary agent hands part of the turn to a specialized agent, e.g. to show it in chat. */
   onDelegate?: (agent: { id: string; name: string }) => void;

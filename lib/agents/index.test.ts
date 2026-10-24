@@ -198,6 +198,37 @@ describe("a run", () => {
     expect(await q.getUsage(userId, q.currentMonth())).toMatchObject({ messageCount: 2 });
   });
 
+  it("shows photos to the model with the caption, and keeps a note of them in history", async () => {
+    const { userId } = await seedUser("photos");
+    const data = new Uint8Array([9, 9, 9]);
+
+    const { chatId } = await runAgent({
+      userId,
+      message: "what plant is this?",
+      images: [{ data, mediaType: "image/jpeg" }],
+      channel: "telegram",
+    });
+    await runAgent({ userId, chatId, message: "", images: [{ data, mediaType: "image/png" }], channel: "telegram" });
+
+    const [first, second] = agentCalls();
+    const image = (mediaType: string) => ({ type: "file", mediaType, data: { type: "data", data } });
+    expect(first.prompt.at(-1)).toEqual({
+      role: "user",
+      content: [image("image/jpeg"), { type: "text", text: "what plant is this?" }],
+    });
+    // The second turn sees the image itself, and the first turn only as text.
+    expect(second.prompt.slice(1)).toEqual([
+      { role: "user", content: [{ type: "text", text: "what plant is this?\n[Sent a photo]" }] },
+      expect.objectContaining({ role: "assistant" }),
+      { role: "user", content: [image("image/png")] },
+    ]);
+    const stored = await q.listMessages(userId, chatId, { limit: 10 });
+    expect(stored.filter((m) => m.role === "user").map((m) => m.content)).toEqual([
+      "what plant is this?\n[Sent a photo]",
+      "[Sent a photo]",
+    ]);
+  });
+
   it("scheduled runs start a new chat", async () => {
     const { userId } = await seedUser("scheduled");
     const a = await runAgent({ userId, message: "brief", channel: "scheduled" });

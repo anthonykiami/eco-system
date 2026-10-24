@@ -124,3 +124,15 @@ export function startTyping(chatId: number): () => void {
   const timer = setInterval(send, 4_000);
   return () => clearInterval(timer);
 }
+
+/** Telegram only lets bots download files up to 20 MB. */
+export const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
+
+/** Downloads a file the user sent. Throws TelegramApiError if Telegram won't hand it over. */
+export async function downloadFile(fileId: string): Promise<Uint8Array> {
+  const file = await callTelegram<{ file_path?: string }>("getFile", { file_id: fileId });
+  if (!file.file_path) throw new TelegramApiError("getFile", 400, "file has no path (too big?)");
+  const res = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
+  if (!res.ok) throw new TelegramApiError("downloadFile", res.status, res.statusText);
+  return new Uint8Array(await res.arrayBuffer());
+}

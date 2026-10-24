@@ -29,6 +29,7 @@ This is a multi-tenant product sold to other people. It has two interfaces: the 
 - **Supermemory:** use the core `supermemory` SDK wrapped in our own AI SDK `tool()`s. Scope every call with `containerTag: \`user-${userId}\``. `@supermemory/tools` is **not** installed because it's incompatible with AI SDK 7.
 - **Langfuse:** via OpenTelemetry (`@langfuse/otel`, `@langfuse/vercel-ai-sdk`). Pass `LANGFUSE_HOST` as `baseUrl`. In serverless handlers, flush with `after(() => spanProcessor.forceFlush())`.
 - **Telegram:** no SDK. `lib/telegram/api.ts` wraps the Bot API with `fetch`, and `lib/telegram/types.ts` has zod schemas for updates. Extend those instead of adding a dependency.
+- **Groq:** transcribes Telegram voice messages (Whisper, `lib/telegram/media.ts`) through its HTTP API with `fetch`; no SDK. `GROQ_API_KEY` is optional: without it the bot says voice isn't available.
 - **Other:** zod 4, cron-parser, Vitest.
 
 ## Deployment notes
@@ -78,6 +79,7 @@ runAgent(input: {
   chatId?: string;   // continue a chat; omitted → latest chat for agent + channel (scheduled → new chat)
   agentId?: string;  // omitted → the user's primary agent
   message: string;
+  images?: { data: Uint8Array; mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' }[]; // photos sent with the message; history keeps a "[Sent a photo]" note
   channel: 'web' | 'telegram' | 'scheduled';
   onDelegate?: (agent: { id: string; name: string }) => void; // fired when the primary agent hands work to a specialist
   onTaskScheduled?: (task: { id: string }) => void;          // fired when the agent creates a task; it starts switched off until the user turns it on

@@ -11,10 +11,23 @@ export const telegramChatSchema = z.object({
   type: z.enum(["private", "group", "supergroup", "channel"]),
 });
 
+const fileSchema = z.object({ file_id: z.string(), file_size: z.number().optional() });
+const timedFileSchema = fileSchema.extend({ duration: z.number(), mime_type: z.string().optional() });
+
 export const telegramMessageSchema = z.object({
   message_id: z.number(),
   chat: telegramChatSchema,
   text: z.string().optional(),
+  /** Text sent with a photo or file. */
+  caption: z.string().optional(),
+  /** One photo in several sizes, smallest first. */
+  photo: z.array(fileSchema.extend({ width: z.number(), height: z.number() })).optional(),
+  voice: timedFileSchema.optional(),
+  audio: timedFileSchema.extend({ file_name: z.string().optional() }).optional(),
+  /** A round video message. */
+  video_note: timedFileSchema.optional(),
+  video: timedFileSchema.optional(),
+  document: fileSchema.extend({ mime_type: z.string().optional(), file_name: z.string().optional() }).optional(),
   /** Set when the user replies to an earlier message; only its id is read. */
   reply_to_message: z.object({ message_id: z.number() }).optional(),
 });

@@ -9,6 +9,7 @@ import { answerCallback, sendHtml } from "./api";
 import { ensureBotCommands } from "./bot-commands";
 import type { BotContext } from "./context";
 import { converse, startNewChat, talk } from "./conversation";
+import { downloadImage, mediaOf, transcribe } from "./media";
 import { normalizeLinkCode, redeemLinkCode } from "./linking";
 import * as msg from "./messages";
 import { clearFlow, getFlow } from "./state";
@@ -84,12 +85,29 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
     return runCommand(c, command, Boolean(flow));
   }
 
-  if (!text) return sendHtml(chatId, msg.TEXT_ONLY);
+  const replyTo = message.reply_to_message?.message_id;
+  const media = mediaOf(message);
+  if (media?.kind === "video") return sendHtml(chatId, msg.VIDEO_UNSUPPORTED);
+  if (media?.kind === "file") return sendHtml(chatId, msg.FILE_UNSUPPORTED);
+  if (media?.kind === "photo") {
+    // A photo isn't an answer to a setup question, so it ends any flow and goes to an agent.
+    await clearFlow(user.id);
+    return converse(c, message.caption?.trim() ?? "", replyTo, { images: [await downloadImage(media)] });
+  }
+
+  // A voice message is handled exactly like the text it contains.
+  let input = text;
+  if (media?.kind === "voice") {
+    const heard = await transcribe(user.id, media);
+    if (!heard.ok) return sendHtml(chatId, msg.voiceProblem(heard.reason));
+    input = heard.text;
+  }
+  if (!input) return sendHtml(chatId, msg.TEXT_ONLY);
 
   const flow = await getFlow(user.id);
-  if (flow?.kind === "new_task") return continueTaskFlow(c, flow, text);
-  if (flow) return continueAgentFlow(c, flow, text);
-  return converse(c, text, message.reply_to_message?.message_id);
+  if (flow?.kind === "new_task") return continueTaskFlow(c, flow, input);
+  if (flow) return continueAgentFlow(c, flow, input);
+  return converse(c, input, replyTo, { voice: media?.kind === "voice" });
 }
 
 async function runCommand(c: BotContext, { name, arg }: Command, cancelledFlow: boolean): Promise<void> {

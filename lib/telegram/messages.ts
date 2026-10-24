@@ -45,7 +45,21 @@ export const WAITLIST =
 
 export const NEW_CHAT = "🆕 Started a new conversation.";
 
-export const TEXT_ONLY = "Sorry, I can only read text messages right now.";
+export const TEXT_ONLY = "Sorry, I can't read that kind of message. Send text, a photo or a voice message.";
+
+export const VIDEO_UNSUPPORTED =
+  "I can't watch videos yet. Send a photo or a voice message instead, or tell me what's in it.";
+
+export const FILE_UNSUPPORTED =
+  "I can't open files yet: only photos (image files work too) and voice messages.";
+
+export const voiceProblem = (reason: "unavailable" | "too_long" | "daily_limit" | "empty") =>
+  ({
+    unavailable: "Voice messages aren't set up yet. Please type your message instead.",
+    too_long: "That recording is too long for me. I can listen to up to 10 minutes.",
+    daily_limit: "You've sent a lot of voice messages today. Please type for now, or try again tomorrow.",
+    empty: "I couldn't hear anything in that recording. Try again, or type it.",
+  })[reason];
 
 export const GENERIC_ERROR = "Sorry, something went wrong. Please try again in a moment.";
 
@@ -57,7 +71,7 @@ export const STALE_BUTTON = "That button has expired. Send the command again.";
 
 export const HELP = [
   "<b>Talking to your agents</b>",
-  "Just send a message: your main agent answers, and hands work to your other agents when it fits.",
+  "Just send a message (text, a photo or a voice message): your main agent answers, and hands work to your other agents when it fits.",
   "<code>@name your message</code> sends one message straight to a specific agent. Replying to an agent's message does the same.",
   "/talk — keep talking to one agent · /main — back to the main agent",
   "/new — start a fresh conversation",

@@ -1,9 +1,10 @@
-import { generateText, stepCountIs, type ModelMessage, type ToolSet } from "ai";
+import { generateText, stepCountIs, type ModelMessage, type ToolSet, type UserContent } from "ai";
 import type { Agent, Message } from "@/lib/db/schema";
 import { telemetryFor } from "@/lib/tracing";
 import { addUsage, type RunContext } from "../context";
 import { PLAN_LIMITS } from "../limits";
 import { recallMemories } from "../memory";
+import type { AgentImage } from "../types";
 import { agentModel } from "../models";
 
 /**
@@ -59,6 +60,15 @@ export function toModelMessages(history: Message[]): ModelMessage[] {
   );
 }
 
+/** The user's turn: plain text, or the photos followed by the text (a caption, or nothing). */
+export function userContent(message: string, images: AgentImage[]): UserContent {
+  if (images.length === 0) return message;
+  return [
+    ...images.map((image) => ({ type: "image" as const, image: image.data, mediaType: image.mediaType })),
+    ...(message ? [{ type: "text" as const, text: message }] : []),
+  ];
+}
+
 /**
  * One turn of the top-level agent: its soul plus the user's memories as the system prompt,
  * the chat history, and the given tools.
@@ -68,12 +78,14 @@ export async function runAgentTurn({
   agent,
   history,
   message,
+  images = [],
   tools,
 }: {
   ctx: RunContext;
   agent: Agent;
   history: Message[];
   message: string;
+  images?: AgentImage[];
   tools: ToolSet;
 }): Promise<string> {
   const memories = await recallMemories(ctx.userId, message);
@@ -84,7 +96,7 @@ export async function runAgentTurn({
       timezone: ctx.timezone,
       integrationNotes: ctx.integrationNotes,
     }),
-    messages: [...toModelMessages(history), { role: "user", content: message }],
+    messages: [...toModelMessages(history), { role: "user", content: userContent(message, images) }],
     tools,
     stopWhen: stepCountIs(PLAN_LIMITS[ctx.plan].maxSteps),
     // Delegations receive this call's abortSignal, so they share the same budget.

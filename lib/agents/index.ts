@@ -24,7 +24,7 @@ import { buildScheduleTools } from "./schedule-tools";
 import { buildDelegationTools } from "./specialized";
 import type { AgentChannel, RunAgent } from "./types";
 
-export type { AgentChannel, RunAgent, RunAgentInput, RunAgentResult } from "./types";
+export type { AgentChannel, AgentImage, RunAgent, RunAgentInput, RunAgentResult } from "./types";
 export { AgentError, BudgetExceededError, RateLimitError, isAgentError } from "./errors";
 
 const HISTORY_LIMIT = 30;
@@ -34,7 +34,23 @@ const EMPTY_REPLY = "Sorry, I wasn't able to finish that. Could you try rephrasi
 const toChatChannel = (channel: AgentChannel): ChatChannel =>
   channel === "telegram" ? "telegram" : "web";
 
-export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, channel, onDelegate, onTaskScheduled }) => {
+/** What history keeps of a turn with photos: the text plus a note, since images aren't stored. */
+export function storedMessage(message: string, imageCount: number): string {
+  if (imageCount === 0) return message;
+  const note = `[Sent ${imageCount === 1 ? "a photo" : `${imageCount} photos`}]`;
+  return message ? `${message}\n${note}` : note;
+}
+
+export const runAgent: RunAgent = async ({
+  userId,
+  chatId,
+  agentId,
+  message,
+  images = [],
+  channel,
+  onDelegate,
+  onTaskScheduled,
+}) => {
   ensureTracing();
   const user = await enforceLimits(userId);
 
@@ -55,7 +71,7 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
     return await withAgentTrace("agent-run", ctx, async () => {
       // Load history before saving this turn so the new message isn't duplicated in the prompt.
       const history = await listMessages(userId, chat.id, { limit: HISTORY_LIMIT });
-      await addMessage(userId, { chatId: chat.id, role: "user", content: message });
+      await addMessage(userId, { chatId: chat.id, role: "user", content: storedMessage(message, images.length) });
 
       const [composio, agents] = await Promise.all([loadComposioTools(userId), listAgents(userId)]);
       const specialists = agent.role === "primary" ? agents.filter((a) => a.role === "specialized") : [];
@@ -72,11 +88,11 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
         ...(channel !== "scheduled" && agent.role === "primary" ? buildAgentTools(userId, agents) : {}),
       };
 
-      const text = (await runAgentTurn({ ctx, agent, history, message, tools })).trim() || EMPTY_REPLY;
+      const text = (await runAgentTurn({ ctx, agent, history, message, images, tools })).trim() || EMPTY_REPLY;
 
       await Promise.all([
         addMessage(userId, { chatId: chat.id, role: "assistant", content: text }),
-        rememberFacts(ctx, { user: message, assistant: text }),
+        rememberFacts(ctx, { user: storedMessage(message, images.length), assistant: text }),
       ]);
       return { text, chatId: chat.id };
     });

@@ -1,4 +1,4 @@
-import { isAgentError, runAgent } from "@/lib/agents";
+import { isAgentError, runAgent, type AgentImage } from "@/lib/agents";
 import { createChat, getOrCreateChat } from "@/lib/db/queries";
 import type { Agent } from "@/lib/db/schema";
 import { findAgent, parseMention } from "./agent-handles";
@@ -23,23 +23,34 @@ export function talkKeyboard(agents: Agent[], activeId: string): InlineKeyboard 
   };
 }
 
+/** What came with the text: photos, or that the text is a transcribed voice message. */
+export type Extras = { images?: AgentImage[]; voice?: boolean };
+
+/** How much of a transcript is echoed back, so the user can tell they were heard right. */
+const HEARD_ECHO_LENGTH = 300;
+
 /**
  * A plain message. "@name ..." sends just this message to that agent, and so does replying to one
  * of an agent's messages; otherwise it goes to the active agent. A bare "@name" switches to that
- * agent, like /talk.
+ * agent, like /talk (unless it's the caption of a photo, which then goes to that agent).
  */
-export async function converse(c: BotContext, text: string, replyToMessageId?: number): Promise<void> {
+export async function converse(
+  c: BotContext,
+  text: string,
+  replyToMessageId?: number,
+  extras: Extras = {},
+): Promise<void> {
   const agents = await loadAgents(c.user.id);
   const mention = agents.length > 1 ? parseMention(text) : undefined;
   const match = mention && findAgent(agents, mention.handle);
 
   // No @, or not one of their agents (an email handle, a username…): an ordinary message.
   if (!mention || !match || match.status === "none") {
-    return replyAs(c, await defaultAgent(c.user.id, agents, replyToMessageId), agents, text);
+    return replyAs(c, await defaultAgent(c.user.id, agents, replyToMessageId), agents, text, extras);
   }
   if (match.status === "ambiguous") return sendHtml(c.chatId, msg.ambiguousAgent(match.agents));
-  if (!mention.rest) return switchTo(c, match.agent);
-  return replyAs(c, match.agent, agents, mention.rest);
+  if (!mention.rest && !extras.images?.length) return switchTo(c, match.agent);
+  return replyAs(c, match.agent, agents, mention.rest, extras);
 }
 
 /** /talk [name]: switch who plain messages go to. Without a name, offers buttons. */
@@ -78,7 +89,13 @@ async function defaultAgent(userId: string, agents: Agent[], replyToMessageId?: 
   return activeAgent(userId, agents);
 }
 
-async function replyAs(c: BotContext, agent: Agent, agents: Agent[], text: string): Promise<void> {
+async function replyAs(
+  c: BotContext,
+  agent: Agent,
+  agents: Agent[],
+  text: string,
+  { images, voice }: Extras = {},
+): Promise<void> {
   const stopTyping = startTyping(c.chatId);
   // Notices go out while the agent is still working; the reply waits for them so order is kept.
   const notices: Promise<void>[] = [];
@@ -91,7 +108,9 @@ async function replyAs(c: BotContext, agent: Agent, agents: Agent[], text: strin
     const result = await runAgent({
       userId: c.user.id,
       chatId: chat.id,
-      message: text,
+      // The agent should know a transcript may have misheard words.
+      message: voice ? `[Voice message, transcribed] ${text}` : text,
+      images,
       channel: "telegram",
       onDelegate: (specialist) => {
         if (announced.has(specialist.id)) return;
@@ -112,6 +131,10 @@ async function replyAs(c: BotContext, agent: Agent, agents: Agent[], text: strin
     stopTyping();
   }
   await Promise.all(notices);
+  if (voice) {
+    const heard = text.length > HEARD_ECHO_LENGTH ? `${text.slice(0, HEARD_ECHO_LENGTH - 1)}…` : text;
+    reply = `🎙 <i>${escapeHtml(heard)}</i>\n\n${reply}`;
+  }
   const messageIds = await sendHtmlMessages(c.chatId, reply);
   if (agents.length > 1) {
     await rememberReplyAgent(c.user.id, messageIds, agent.id).catch((err: unknown) =>
