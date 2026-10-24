@@ -5,7 +5,7 @@ import { telemetryFor } from "@/lib/tracing";
 import { addUsage, type RunContext } from "../context";
 import { PLAN_LIMITS } from "../limits";
 import { agentModel } from "../models";
-import { agentSlug } from "../naming";
+import { asciiAgentSlug } from "../naming";
 import { buildIntegrationLimits } from "../primary";
 
 /**
@@ -16,7 +16,7 @@ import { buildIntegrationLimits } from "../primary";
 export function buildDelegationTools(ctx: RunContext, agents: Agent[], tools: ToolSet): ToolSet {
   const delegationTools: ToolSet = {};
   for (const agent of agents) {
-    let name = `delegate_to_${agentSlug(agent.name)}`;
+    let name = `delegate_to_${asciiAgentSlug(agent.name)}`;
     if (name in delegationTools) name = `${name}_${agent.id.slice(0, 8)}`;
 
     delegationTools[name] = tool({

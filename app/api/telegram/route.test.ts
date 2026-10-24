@@ -683,6 +683,51 @@ describe("managing agents", () => {
     expect(calls("answerCallbackQuery")).not.toHaveLength(0);
   });
 
+  it("still answers a button tap when the action fails", async () => {
+    const { chatId, specialist } = await seedWithSpecialist();
+    fetchMock.mockImplementation(async (url) =>
+      url.endsWith("/editMessageText")
+        ? new Response(JSON.stringify({ ok: false, error_code: 400, description: "Bad Request: message can't be edited" }), { status: 400 })
+        : okResponse(url),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await post(buttonUpdate(chatId, `a:${specialist.id}`));
+
+    consoleError.mockRestore();
+    fetchMock.mockImplementation(okResponse);
+    expect(calls("answerCallbackQuery")).toHaveLength(1);
+    expect(sentTexts(chatId)).toEqual([msg.GENERIC_ERROR]);
+  });
+
+  it("keeps the agent list short enough to edit in place", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await q.ensurePrimaryAgent(user.id);
+    for (let i = 0; i < 10; i++) {
+      await q.createAgent(user.id, { name: `Agent ${i}`, description: "d".repeat(1000), soul: "s" });
+    }
+
+    await post(buttonUpdate(chatId, "al"));
+
+    // Descriptions are cut short in the list (the card shows all of it), so it fits in one message.
+    expect(editedTexts(chatId)).toHaveLength(1);
+    expect(editedTexts(chatId)[0].length).toBeLessThanOrEqual(4096);
+  });
+
+  it("rechecks the agent limit before creating, in case agents were added meanwhile", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await q.ensurePrimaryAgent(user.id);
+    await post(textUpdate(chatId, "/newagent Coach"));
+    for (let i = 0; i < 10; i++) await q.createAgent(user.id, { name: `Agent ${i}`, soul: "s" });
+
+    await post(textUpdate(chatId, "Coaches workouts."));
+
+    expect((await q.listAgents(user.id)).some((a) => a.name === "Coach")).toBe(false);
+    expect(lastSent(chatId)).toContain("maximum of 10 agents");
+  });
+
   it("only answers button taps from unlinked chats", async () => {
     const chatId = nextChatId++;
 
@@ -775,6 +820,35 @@ describe("scheduled tasks", () => {
 
     expect(await q.getJob(owner.id, job.id)).toBeDefined();
     expect(editedTexts(attackerChat)).toEqual([]);
+  });
+
+  it("asks the user to turn on a task the agent created, and the buttons turn it on or discard it", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    const agent = await q.ensurePrimaryAgent(user.id);
+    const createdOff = async () =>
+      q.createJob(user.id, { agentId: agent.id, cronExpression: "0 9 * * *", prompt: "Check my inbox", enabled: false });
+    runAgentMock.mockImplementation(async ({ chatId: id, onTaskScheduled }) => {
+      onTaskScheduled?.({ id: (await createdOff()).id });
+      return { text: "I've set that up.", chatId: id! };
+    });
+
+    await post(textUpdate(chatId, "every day at 9 check my inbox"));
+    await post(textUpdate(chatId, "and another"));
+
+    const texts = sentTexts(chatId);
+    expect(texts[0]).toBe("I've set that up.");
+    expect(texts[1]).toContain("🗓 <b>New scheduled task</b>");
+    expect(texts[1]).toContain("Every day at 09:00");
+    expect(texts[1]).toContain("It's off until you turn it on.");
+
+    const [first, second] = await q.listJobs(user.id);
+    await post(buttonUpdate(chatId, `tr:${first.id}`));
+    await post(buttonUpdate(chatId, `ty:${second.id}`));
+
+    expect((await q.getJob(user.id, first.id))?.enabled).toBe(true);
+    expect((await q.getJob(user.id, first.id))?.nextRunAt).toBeInstanceOf(Date);
+    expect(await q.getJob(user.id, second.id)).toBeUndefined();
   });
 
   it("a days button from an abandoned flow is stale", async () => {

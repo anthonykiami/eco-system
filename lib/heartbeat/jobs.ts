@@ -12,14 +12,16 @@ async function timezoneFor(userId: string): Promise<string> {
 
 /**
  * Throws InvalidScheduleError for a bad cron expression, NotFoundError if the agent
- * doesn't belong to the user.
+ * doesn't belong to the user. With `enabled: false` the job waits for resumeUserJob.
  */
 export async function createUserJob(
   userId: string,
   input: { agentId: string; cronExpression: string; prompt: string },
+  { enabled = true }: { enabled?: boolean } = {},
 ): Promise<ScheduledJob> {
+  // Validates the schedule either way; a disabled job gets its first run when it's resumed.
   const nextRunAt = computeNextRunAt(input.cronExpression, await timezoneFor(userId));
-  return q.createJob(userId, { ...input, enabled: true, nextRunAt });
+  return q.createJob(userId, { ...input, enabled, nextRunAt: enabled ? nextRunAt : null });
 }
 
 export async function listUserJobs(userId: string): Promise<ScheduledJob[]> {

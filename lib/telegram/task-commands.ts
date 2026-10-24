@@ -17,7 +17,7 @@ import {
   type DayPreset,
 } from "@/lib/heartbeat/briefing";
 import { answerCallback, editHtml, sendHtml } from "./api";
-import { loadAgents, type BotContext } from "./conversation";
+import { loadAgents, type BotContext } from "./context";
 import { escapeHtml } from "./format";
 import * as msg from "./messages";
 import { clearFlow, getFlow, setFlow, type Flow } from "./state";
@@ -98,6 +98,35 @@ function cardView(c: BotContext, job: ScheduledJob, agents: Agent[]): { html: st
 export async function showTasks(c: BotContext): Promise<void> {
   const { html, keyboard } = await listView(c);
   return sendHtml(c.chatId, html, { keyboard });
+}
+
+/**
+ * Asks the user to turn on a task an agent just created (see lib/agents/schedule-tools.ts for why
+ * agent-created tasks start off). The buttons are the ordinary resume and delete actions.
+ */
+export async function sendTaskConfirmation(c: BotContext, jobId: string): Promise<void> {
+  const job = await getJob(c.user.id, jobId);
+  if (!job || job.enabled) return;
+  const agents = await loadAgents(c.user.id);
+  const agent = agents.find((a) => a.id === job.agentId);
+  const lines = [
+    `🗓 <b>New scheduled task</b>${agents.length > 1 && agent ? ` for <b>${escapeHtml(agent.name)}</b>` : ""}`,
+    `${describeCron(job.cronExpression)} (${escapeHtml(c.user.timezone)})`,
+    "",
+    isBriefing(job) ? "☀️ Morning briefing" : escapeHtml(job.prompt),
+    "",
+    "It's off until you turn it on.",
+  ];
+  return sendHtml(c.chatId, lines.join("\n"), {
+    keyboard: {
+      inline_keyboard: [
+        [
+          { text: "✅ Turn on", callback_data: `tr:${job.id}` },
+          { text: "🗑 Discard", callback_data: `ty:${job.id}` },
+        ],
+      ],
+    },
+  });
 }
 
 // ─── Buttons ────────────────────────────────────────────────────────────────

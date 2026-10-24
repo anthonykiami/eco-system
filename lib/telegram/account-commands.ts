@@ -3,7 +3,7 @@ import { PLAN_LIMITS, resolvePlan } from "@/lib/agents/limits";
 import { currentMonth, getUsage, updateUser } from "@/lib/db/queries";
 import { rescheduleUserJobs } from "@/lib/heartbeat";
 import { sendHtml } from "./api";
-import type { BotContext } from "./conversation";
+import type { BotContext } from "./context";
 import { escapeHtml } from "./format";
 import * as msg from "./messages";
 import { resolveTimezone } from "./time";

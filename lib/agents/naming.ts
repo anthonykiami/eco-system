@@ -9,19 +9,28 @@ export const MAX_AGENT_DESCRIPTION_LENGTH = 1000;
 export const MAIN_SLUG = "main";
 
 /**
- * "Travel Planner" → "travel_planner". Used for delegation tool names (delegate_to_travel_planner)
- * and Telegram handles (@travel_planner), so the two always match. Anthropic tool names allow
- * [a-zA-Z0-9_-]{1,64}.
+ * "Travel Planner" → "travel_planner", "Тренер" → "тренер". The user's handle for an agent
+ * (@travel_planner in Telegram) and what makes two names count as the same. Accents are dropped;
+ * letters in any script are kept, so non-Latin names get distinct handles.
  */
 export function agentSlug(name: string): string {
   return (
     name
       .toLowerCase()
       .normalize("NFKD")
-      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/\p{M}/gu, "")
+      .replace(/[^\p{L}\p{N}]+/gu, "_")
       .replace(/^_+|_+$/g, "")
       .slice(0, MAX_AGENT_NAME_LENGTH) || "agent"
   );
+}
+
+/**
+ * agentSlug limited to what Anthropic tool names allow ([a-zA-Z0-9_-]{1,64}). Matches the handle
+ * for Latin names (delegate_to_travel_planner ↔ @travel_planner); callers disambiguate clashes.
+ */
+export function asciiAgentSlug(name: string): string {
+  return agentSlug(name).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "agent";
 }
 
 export type NameCheck =

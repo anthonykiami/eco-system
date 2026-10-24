@@ -8,6 +8,10 @@ import { escapeHtml } from "./format";
 export const settingsUrl = () => `${env.APP_URL}/settings/telegram`;
 export const connectionsUrl = () => `${env.APP_URL}/settings/integrations`;
 
+/** The agent list shows the start of each description; the agent's card shows all of it. */
+const LIST_DESCRIPTION_LENGTH = 120;
+const truncate = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
 const name = (agent: Agent) => `<b>${escapeHtml(agent.name)}</b>`;
 const handle = (agent: Agent) => `<code>@${displayHandle(agent)}</code>`;
 
@@ -100,7 +104,7 @@ export const agentList = (agents: Agent[], activeId: string) =>
     ...agents.map((a) =>
       [
         `${name(a)} ${handle(a)}${a.role === "primary" ? " · main" : ""}${a.id === activeId ? " · <i>talking now</i>" : ""}`,
-        a.description ? escapeHtml(a.description) : undefined,
+        a.description ? escapeHtml(truncate(a.description, LIST_DESCRIPTION_LENGTH)) : undefined,
       ]
         .filter(Boolean)
         .join("\n"),

@@ -18,6 +18,8 @@ export type RunContext = TraceContext & {
   usage: TokenUsage;
   /** From RunAgentInput; fired by each delegation tool before the specialist runs. */
   onDelegate?: (agent: { id: string; name: string }) => void;
+  /** From RunAgentInput; fired after schedule_task creates a (switched-off) task. */
+  onTaskScheduled?: (task: { id: string }) => void;
 };
 
 export function addUsage(total: TokenUsage, usage: LanguageModelUsage): void {

@@ -7,7 +7,8 @@ import { continueAgentFlow, handleAgentButton, showAgents, startNewAgent } from 
 import { MAIN_SLUG } from "@/lib/agents/naming";
 import { answerCallback, sendHtml } from "./api";
 import { ensureBotCommands } from "./bot-commands";
-import { converse, startNewChat, talk, type BotContext } from "./conversation";
+import type { BotContext } from "./context";
+import { converse, startNewChat, talk } from "./conversation";
 import { normalizeLinkCode, redeemLinkCode } from "./linking";
 import * as msg from "./messages";
 import { clearFlow, getFlow } from "./state";
@@ -141,13 +142,18 @@ async function handleCallback(query: TelegramCallbackQuery, chatId: number): Pro
   const [action, arg = ""] = (query.data ?? "").split(":", 2);
   const messageId = query.message.message_id;
 
-  // Answered after the action (which stops the button's spinner), unless the action showed its own toast.
-  const task = await handleTaskButton(c, query.id, action, arg, messageId);
-  if (task === "answered") return;
-  if (!task && !(await handleAgentButton(c, action, arg, messageId))) {
-    await sendHtml(chatId, msg.STALE_BUTTON);
+  // Answering stops the button's spinner. It's done even if the action throws, unless the
+  // action already answered with its own toast.
+  let answered = false;
+  try {
+    const task = await handleTaskButton(c, query.id, action, arg, messageId);
+    answered = task === "answered";
+    if (!task && !(await handleAgentButton(c, action, arg, messageId))) {
+      await sendHtml(chatId, msg.STALE_BUTTON);
+    }
+  } finally {
+    if (!answered) await answerCallback(query.id).catch(() => {});
   }
-  await answerCallback(query.id);
 }
 
 async function linkChat(message: TelegramMessage, rawCode: string): Promise<void> {

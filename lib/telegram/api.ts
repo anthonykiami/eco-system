@@ -1,6 +1,6 @@
 import { env } from "@/lib/env";
 import { htmlToPlainText } from "./format";
-import { splitTelegramHtml } from "./split";
+import { splitTelegramHtml, TELEGRAM_MESSAGE_LIMIT } from "./split";
 import type { InlineKeyboard } from "./types";
 
 type TelegramResponse<T> =
@@ -80,7 +80,8 @@ export async function sendHtmlMessages(
 
 /**
  * Replaces a message the bot sent earlier (e.g. a card after one of its buttons is tapped).
- * Text must fit in one message. "Message is not modified" is not an error: the card is already current.
+ * Text too long for one message is sent as new messages instead, since an edit can't split.
+ * "Message is not modified" is not an error: the card is already current.
  */
 export async function editHtml(
   chatId: number | string,
@@ -88,6 +89,7 @@ export async function editHtml(
   html: string,
   { keyboard }: { keyboard?: InlineKeyboard } = {},
 ): Promise<void> {
+  if (html.length > TELEGRAM_MESSAGE_LIMIT) return sendHtml(chatId, html, { keyboard });
   try {
     await callTelegram("editMessageText", {
       chat_id: chatId,

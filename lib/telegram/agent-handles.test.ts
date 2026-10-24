@@ -19,6 +19,9 @@ describe("agentSlug", () => {
     expect(agentSlug("  🔎 Researcher! ")).toBe("researcher");
     expect(agentSlug("Café Bot")).toBe("cafe_bot");
     expect(agentSlug("🤖")).toBe("agent");
+    // Non-Latin names keep their letters, so two of them don't collide.
+    expect(agentSlug("Тренер")).toBe("тренер");
+    expect(agentSlug("コーチ")).not.toBe(agentSlug("Тренер"));
   });
 });
 

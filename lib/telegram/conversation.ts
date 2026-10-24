@@ -1,28 +1,14 @@
 import { isAgentError, runAgent } from "@/lib/agents";
-import { createChat, ensurePrimaryAgent, getOrCreateChat, listAgents } from "@/lib/db/queries";
-import type { Agent, User } from "@/lib/db/schema";
+import { createChat, getOrCreateChat } from "@/lib/db/queries";
+import type { Agent } from "@/lib/db/schema";
 import { findAgent, parseMention } from "./agent-handles";
 import { sendHtml, sendHtmlMessages, startTyping } from "./api";
+import { activeAgent, loadAgents, type BotContext } from "./context";
 import { escapeHtml, markdownToTelegramHtml } from "./format";
 import * as msg from "./messages";
-import { getActiveAgentId, getReplyAgentId, rememberReplyAgent, setActiveAgentId } from "./state";
+import { getReplyAgentId, rememberReplyAgent, setActiveAgentId } from "./state";
+import { sendTaskConfirmation } from "./task-commands";
 import type { InlineKeyboard } from "./types";
-
-/** Who the bot is talking to: a linked, active user in their private chat. */
-export type BotContext = { user: User; chatId: number };
-
-/** The user's agents, primary first. Creates the primary agent on first use. */
-export async function loadAgents(userId: string): Promise<Agent[]> {
-  const primary = await ensurePrimaryAgent(userId);
-  const agents = await listAgents(userId);
-  return [primary, ...agents.filter((a) => a.id !== primary.id)];
-}
-
-/** The agent plain messages go to: the one picked with /talk, else the primary agent. */
-export async function activeAgent(userId: string, agents: Agent[]): Promise<Agent> {
-  const activeId = await getActiveAgentId(userId);
-  return agents.find((a) => a.id === activeId) ?? agents[0];
-}
 
 /** Bold name above each reply once the user has more than one agent, so the chat reads like a group. */
 export const replyLabel = (agent: Agent, agents: Agent[]) =>
@@ -97,6 +83,7 @@ async function replyAs(c: BotContext, agent: Agent, agents: Agent[], text: strin
   // Notices go out while the agent is still working; the reply waits for them so order is kept.
   const notices: Promise<void>[] = [];
   const announced = new Set<string>();
+  const scheduledTaskIds: string[] = [];
   let reply: string;
   try {
     // Each agent has one ongoing Telegram chat: its latest one. /new starts another.
@@ -115,6 +102,7 @@ async function replyAs(c: BotContext, agent: Agent, agents: Agent[], text: strin
           ),
         );
       },
+      onTaskScheduled: ({ id }) => scheduledTaskIds.push(id),
     });
     reply = replyLabel(agent, agents) + markdownToTelegramHtml(result.text);
   } catch (err) {
@@ -130,4 +118,6 @@ async function replyAs(c: BotContext, agent: Agent, agents: Agent[], text: strin
       console.error("[telegram] failed to remember reply agent", err),
     );
   }
+  // Tasks the agent created are off until the user turns them on here.
+  for (const id of scheduledTaskIds) await sendTaskConfirmation(c, id);
 }

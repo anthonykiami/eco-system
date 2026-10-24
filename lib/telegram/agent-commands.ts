@@ -7,7 +7,8 @@ import {
 import { createAgent, deleteAgent, getAgent, updateAgent } from "@/lib/db/queries";
 import type { Agent } from "@/lib/db/schema";
 import { editHtml, sendHtml } from "./api";
-import { activeAgent, loadAgents, switchTo, type BotContext } from "./conversation";
+import { activeAgent, loadAgents, type BotContext } from "./context";
+import { switchTo } from "./conversation";
 import * as msg from "./messages";
 import { clearFlow, getActiveAgentId, setActiveAgentId, setFlow, type Flow } from "./state";
 import type { InlineKeyboard } from "./types";
@@ -151,7 +152,11 @@ export async function continueAgentFlow(c: BotContext, flow: AgentFlow, text: st
 
   if (flow.kind === "new_agent") {
     if (text.length > MAX_AGENT_DESCRIPTION_LENGTH) return sendHtml(c.chatId, msg.DESCRIPTION_INVALID);
-    // Checked again: another agent may have taken the name while this flow was open.
+    // Checked again: the main agent may have created agents while this flow was open.
+    if (agents.length - 1 >= MAX_SPECIALISTS) {
+      await clearFlow(userId);
+      return sendHtml(c.chatId, msg.tooManyAgents(MAX_SPECIALISTS));
+    }
     const problem = nameProblem(flow.name, agents);
     if (problem) {
       await setFlow(userId, { kind: "new_agent", step: "name" });

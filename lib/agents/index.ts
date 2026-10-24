@@ -34,7 +34,7 @@ const EMPTY_REPLY = "Sorry, I wasn't able to finish that. Could you try rephrasi
 const toChatChannel = (channel: AgentChannel): ChatChannel =>
   channel === "telegram" ? "telegram" : "web";
 
-export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, channel, onDelegate }) => {
+export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, channel, onDelegate, onTaskScheduled }) => {
   ensureTracing();
   const user = await enforceLimits(userId);
 
@@ -48,6 +48,7 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
     integrationNotes: [],
     usage: { inputTokens: 0, outputTokens: 0 },
     onDelegate,
+    onTaskScheduled,
   };
 
   try {
@@ -67,7 +68,8 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
         ...buildDelegationTools(ctx, specialists, workTools),
         // A scheduled run can't schedule more runs or create agents.
         ...(channel === "scheduled" ? {} : buildScheduleTools(ctx, agent, agents)),
-        ...(channel !== "scheduled" && agent.role === "primary" ? buildAgentTools(userId, [...agents]) : {}),
+        // Same array: an agent created this turn can be given a task this turn.
+        ...(channel !== "scheduled" && agent.role === "primary" ? buildAgentTools(userId, agents) : {}),
       };
 
       const text = (await runAgentTurn({ ctx, agent, history, message, tools })).trim() || EMPTY_REPLY;

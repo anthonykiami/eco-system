@@ -2,13 +2,7 @@ import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { getJob } from "@/lib/db/queries";
 import type { Agent, ScheduledJob } from "@/lib/db/schema";
-import {
-  createUserJob,
-  deleteUserJob,
-  listUserJobs,
-  pauseUserJob,
-  resumeUserJob,
-} from "@/lib/heartbeat";
+import { createUserJob, deleteUserJob, listUserJobs, pauseUserJob } from "@/lib/heartbeat";
 import { briefingPrompt, dailyCron, describeCron, WEEKDAYS, weeklyCron } from "@/lib/heartbeat/briefing";
 import type { RunContext } from "./context";
 
@@ -28,6 +22,11 @@ function formatWhen(date: Date | null, timezone: string): string | null {
  * Lets the agent the user is talking to create and manage scheduled tasks in conversation
  * ("every weekday at 7, check my inbox"). `agents` must already be scoped to ctx.userId.
  * Not given to scheduled runs, so a task can't schedule more tasks.
+ *
+ * Tasks the agent creates start switched off and only the user can turn them on (a Telegram
+ * button, /tasks, or the web). Otherwise instructions hidden in an email or web page the agent
+ * read could plant a recurring job that keeps running with the user's integrations. For the
+ * same reason there's no resume tool.
  */
 export function buildScheduleTools(ctx: RunContext, self: Agent, agents: Agent[]): ToolSet {
   const userId = ctx.userId;
@@ -90,27 +89,29 @@ export function buildScheduleTools(ctx: RunContext, self: Agent, agents: Agent[]
         if (!morning_briefing && !task.trim()) return { error: "Say what the task should do." };
 
         const prompt = morning_briefing ? briefingPrompt(task) : task;
-        const job = await createUserJob(userId, { agentId: owner.id, cronExpression, prompt });
-        return { scheduled: describe(job) };
+        const job = await createUserJob(userId, { agentId: owner.id, cronExpression, prompt }, { enabled: false });
+        try {
+          ctx.onTaskScheduled?.({ id: job.id });
+        } catch (err) {
+          console.error(`[agents] onTaskScheduled listener failed for job ${job.id}`, err);
+        }
+        return {
+          scheduled: describe(job),
+          note:
+            ctx.channel === "telegram"
+              ? "Created switched off. The user turns it on with the button shown under your reply. Tell them."
+              : "Created switched off. The user turns it on in Settings → Scheduled tasks or with /tasks in Telegram. Tell them.",
+        };
       },
     }),
 
     pause_scheduled_task: tool({
-      description: "Pause a scheduled task by id (from list_scheduled_tasks). It can be resumed later.",
+      description: "Pause a scheduled task by id (from list_scheduled_tasks). The user can turn it back on with /tasks or in settings.",
       inputSchema: z.object({ id: z.string() }),
       // Every helper is scoped to userId, so another user's id reads as not found.
       execute: async ({ id }) => {
         const job = await pauseUserJob(userId, id);
         return job ? { paused: describe(job) } : { error: "No such task." };
-      },
-    }),
-
-    resume_scheduled_task: tool({
-      description: "Resume a paused scheduled task by id. It continues from its next scheduled time.",
-      inputSchema: z.object({ id: z.string() }),
-      execute: async ({ id }) => {
-        const job = await resumeUserJob(userId, id);
-        return job ? { resumed: describe(job) } : { error: "No such task." };
       },
     }),
 
