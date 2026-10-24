@@ -35,18 +35,20 @@ export default async function SettingsPage() {
           </form>
         </dd>
       </dl>
-      <nav className="flex flex-col gap-2 text-sm">
-        <Link href="/settings/telegram" className="underline">
-          Telegram
+      <nav className="flex flex-col gap-3 text-sm">
+        <Link href="/settings/telegram" className="flex flex-col">
+          <span className="underline">Telegram</span>
+          <span className="text-neutral-500">Where you talk to your agents.</span>
         </Link>
-        <Link href="/settings/integrations" className="underline">
-          Integrations
+        <Link href="/settings/integrations" className="flex flex-col">
+          <span className="underline">Integrations</span>
+          <span className="text-neutral-500">Connect Gmail, Calendar and more, and choose what agents may do.</span>
         </Link>
-        <Link href="/settings/schedules" className="underline">
-          Scheduled tasks
+        <Link href="/settings/schedules" className="flex flex-col">
+          <span className="underline">Scheduled tasks</span>
+          <span className="text-neutral-500">Also manageable in Telegram with /tasks.</span>
         </Link>
       </nav>
-      <p className="text-neutral-500">More settings coming soon.</p>
       <Link href="/" className="text-sm underline">
         Back
       </Link>

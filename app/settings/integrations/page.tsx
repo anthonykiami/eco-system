@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listToolkitConnections } from "@/lib/agents/composio";
 import { requireActiveUser } from "@/lib/auth/session";
+import { env } from "@/lib/env";
 import { connectToolkit, removeToolkit, setToolkitAccess } from "./actions";
 
 const ERRORS: Record<string, string> = {
@@ -30,13 +31,20 @@ export default async function IntegrationsPage({
       <div>
         <h1 className="text-2xl font-semibold">Integrations</h1>
         <p className="mt-1 text-neutral-500">
-          Connect your accounts so your assistant can act on them. It only ever sees the
-          accounts you connect here.
+          Connect your accounts so your agents can act on them, then talk to them in Telegram.
+          They only ever see the accounts you connect here.
         </p>
       </div>
 
       {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
-      {justConnected && <p className="text-sm text-green-600">Connected.</p>}
+      {justConnected && (
+        <p className="text-sm text-green-600">
+          Connected. Your agents can use it from your next message.{" "}
+          <a href={`https://t.me/${env.TELEGRAM_BOT_USERNAME}`} className="underline">
+            Open Telegram
+          </a>
+        </p>
+      )}
       {justSaved && <p className="text-sm text-green-600">Saved. It applies from your next message.</p>}
       {justFailed && (
         <p role="alert" className="text-sm text-red-500">
@@ -88,7 +96,7 @@ export default async function IntegrationsPage({
               <form action={setToolkitAccess} className="flex flex-col gap-2">
                 <input type="hidden" name="slug" value={toolkit.slug} />
                 <fieldset className="flex flex-col gap-2">
-                  <legend className="mb-1 text-sm font-medium">What your assistant can do</legend>
+                  <legend className="mb-1 text-sm font-medium">What your agents can do</legend>
                   {toolkit.access.map((level) => (
                     <label key={level.id} className="flex items-start gap-2 text-sm">
                       <input

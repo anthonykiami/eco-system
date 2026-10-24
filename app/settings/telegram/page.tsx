@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireActiveUser } from "@/lib/auth/session";
 import { getUser } from "@/lib/db/queries";
+import { env } from "@/lib/env";
 import { unlinkTelegram } from "./actions";
 import { ConnectForm } from "./connect-form";
 
@@ -13,7 +14,8 @@ export default async function TelegramSettingsPage() {
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
       <h1 className="text-2xl font-semibold">Telegram</h1>
       <p className="text-neutral-500">
-        Link Telegram to chat with your assistant from your phone.
+        Telegram is where you talk to your agents, get scheduled briefings, and manage agents and
+        tasks. Send <code>/help</code> to the bot to see everything it can do.
       </p>
 
       {user?.telegramChatId ? (
@@ -24,6 +26,12 @@ export default async function TelegramSettingsPage() {
               <span className="text-neutral-500"> since {linkedAt.toLocaleDateString("en-US", { timeZone: session.user.timezone, dateStyle: "medium" })}</span>
             )}
           </p>
+          <a
+            href={`https://t.me/${env.TELEGRAM_BOT_USERNAME}`}
+            className="self-start rounded-lg bg-foreground px-4 py-2 text-sm text-background"
+          >
+            Open Telegram
+          </a>
           <form action={unlinkTelegram}>
             <button
               type="submit"
