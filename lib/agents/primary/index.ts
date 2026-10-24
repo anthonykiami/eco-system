@@ -6,8 +6,12 @@ import { PLAN_LIMITS } from "../limits";
 import { recallMemories } from "../memory";
 import { agentModel } from "../models";
 
-/** Routes calling runAgent allow 60s; leave headroom for saving messages and memory afterwards. */
+/**
+ * Chat routes allow 60s and the scheduled-job worker 300s; leave headroom for saving
+ * messages and memory afterwards. Scheduled runs (briefings) can gather far more.
+ */
 const TURN_TIMEOUT_MS = 45_000;
+const SCHEDULED_TURN_TIMEOUT_MS = 240_000;
 
 /** The model has no clock, so the current moment in the user's timezone is stated explicitly. */
 export function buildSituation(timezone: string, now: Date = new Date()): string {
@@ -70,7 +74,7 @@ export async function runAgentTurn({
     tools,
     stopWhen: stepCountIs(PLAN_LIMITS[ctx.plan].maxSteps),
     // Delegations receive this call's abortSignal, so they share the same budget.
-    timeout: { totalMs: TURN_TIMEOUT_MS },
+    timeout: { totalMs: ctx.channel === "scheduled" ? SCHEDULED_TURN_TIMEOUT_MS : TURN_TIMEOUT_MS },
     ...telemetryFor(agent.role === "primary" ? "primary-agent" : `agent:${agent.name}`, ctx),
   });
   addUsage(ctx.usage, result.totalUsage);
