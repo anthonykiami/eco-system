@@ -53,9 +53,10 @@ async function enqueueJob(
   const [job, user] = await Promise.all([q.getJob(userId, jobId), q.getUser(userId)]);
   if (!job || !user || !job.enabled || !job.nextRunAt) return null;
 
-  let nextRunAt: Date;
+  // A one-off runs once: claiming it clears next_run_at so it never comes due again.
+  let nextRunAt: Date | null = null;
   try {
-    nextRunAt = computeNextRunAt(job.cronExpression, user.timezone, now);
+    if (job.kind === "recurring") nextRunAt = computeNextRunAt(job.cronExpression, user.timezone, now);
   } catch (err) {
     if (!(err instanceof InvalidScheduleError)) throw err;
     console.error(`[heartbeat] disabling job ${jobId}: ${err.message}`);

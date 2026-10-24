@@ -851,6 +851,26 @@ describe("scheduled tasks", () => {
     expect(await q.getJob(user.id, second.id)).toBeUndefined();
   });
 
+  it("shows one-offs by their moment, and won't turn one on once its time has passed", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    const agent = await q.ensurePrimaryAgent(user.id);
+    const oneOff = (prompt: string, nextRunAt: Date) =>
+      q.createJob(user.id, { agentId: agent.id, kind: "once", cronExpression: "0 15 25 10 *", prompt, enabled: false, nextRunAt });
+    const upcoming = await oneOff("Check flight prices", new Date(Date.now() + 86_400_000));
+    const missed = await oneOff("Too late", new Date(Date.now() - 60_000));
+
+    await post(textUpdate(chatId, "/tasks"));
+    expect(lastSent(chatId)).toMatch(/<b>Check flight prices<\/b>\n {4}Once, .* · paused/);
+
+    await post(buttonUpdate(chatId, `tr:${upcoming.id}`));
+    expect(await q.getJob(user.id, upcoming.id)).toMatchObject({ enabled: true, nextRunAt: upcoming.nextRunAt });
+
+    await post(buttonUpdate(chatId, `tr:${missed.id}`));
+    expect(calls("answerCallbackQuery").at(-1)).toMatchObject({ text: msg.TASK_TIME_PASSED });
+    expect((await q.getJob(user.id, missed.id))?.enabled).toBe(false);
+  });
+
   it("a days button from an abandoned flow is stale", async () => {
     const chatId = nextChatId++;
     const user = await seedUser({ telegramChatId: chatId });

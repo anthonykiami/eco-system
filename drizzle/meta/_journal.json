@@ -15,6 +15,13 @@
       "when": 1792824031592,
       "tag": "0001_integration_access",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792883606849,
+      "tag": "0002_one_off_jobs",
+      "breakpoints": true
     }
   ]
 }

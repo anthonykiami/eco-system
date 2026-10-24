@@ -361,6 +361,29 @@ describe("scheduled task tools", () => {
     expect(String(out.note)).toContain("switched off");
   });
 
+  it("sets reminders that are on from the start, and one-off tasks that wait for the user", async () => {
+    const { userId, primary } = await seedUser("reminders");
+    const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(
+      new Date(Date.now() + 86_400_000),
+    );
+
+    const reminder = await callTool(userId, "set_reminder", { text: "Call mom", date, time: "18:00" });
+    const once = await callTool(userId, "schedule_task", { task: "Check flight prices", time: "09:00", date });
+    const past = await callTool(userId, "set_reminder", { text: "x", date: "2020-01-01", time: "09:00" });
+    const both = await callTool(userId, "schedule_task", { task: "x", time: "09:00", date, days: "every_day" });
+
+    const jobs = await q.listJobs(userId);
+    expect(jobs.map(({ kind, enabled, prompt, agentId }) => ({ kind, enabled, prompt, agentId }))).toEqual([
+      { kind: "reminder", enabled: true, prompt: "Call mom", agentId: primary.id },
+      { kind: "once", enabled: false, prompt: "Check flight prices", agentId: primary.id },
+    ]);
+    expect(jobs.every((job) => job.nextRunAt && job.nextRunAt > new Date())).toBe(true);
+    expect(reminder).toMatchObject({ reminder: { kind: "reminder", schedule: expect.stringMatching(/^Reminder, .* 6:00 PM$/) } });
+    expect(once).toMatchObject({ scheduled: { kind: "once", status: "paused" } });
+    expect(past).toEqual({ error: "That time has already passed." });
+    expect(both).toMatchObject({ error: expect.stringContaining("either") });
+  });
+
   it("reports each created task to onTaskScheduled, and can't switch tasks on itself", async () => {
     const { userId } = await seedUser("confirmer");
     const onTaskScheduled = vi.fn();

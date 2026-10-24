@@ -1,11 +1,11 @@
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, isNull, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { scheduledJobs, type ScheduledJob } from "@/lib/db/schema";
 import { getAgent } from "./agents";
 import { NotFoundError } from "./errors";
 
 export type NewJobInput = Pick<ScheduledJob, "agentId" | "cronExpression" | "prompt"> &
-  Partial<Pick<ScheduledJob, "enabled" | "nextRunAt">>;
+  Partial<Pick<ScheduledJob, "kind" | "enabled" | "nextRunAt">>;
 export type JobPatch = Partial<
   Pick<ScheduledJob, "agentId" | "cronExpression" | "prompt" | "enabled" | "nextRunAt">
 >;
@@ -84,7 +84,7 @@ export async function markJobRun(
 export async function claimJobSchedule(
   userId: string,
   jobId: string,
-  { expectedNextRunAt, nextRunAt }: { expectedNextRunAt: Date; nextRunAt: Date | null },
+  { expectedNextRunAt, nextRunAt }: { expectedNextRunAt: Date | null; nextRunAt: Date | null },
 ): Promise<boolean> {
   const rows = await db
     .update(scheduledJobs)
@@ -93,7 +93,7 @@ export async function claimJobSchedule(
       and(
         eq(scheduledJobs.userId, userId),
         eq(scheduledJobs.id, jobId),
-        eq(scheduledJobs.nextRunAt, expectedNextRunAt),
+        expectedNextRunAt ? eq(scheduledJobs.nextRunAt, expectedNextRunAt) : isNull(scheduledJobs.nextRunAt),
       ),
     )
     .returning({ id: scheduledJobs.id });

@@ -1,6 +1,7 @@
-export { computeNextRunAt, isValidSchedule, InvalidScheduleError } from "./schedule";
+export { computeNextRunAt, isValidSchedule, InvalidScheduleError, PastTimeError } from "./schedule";
 export {
   createUserJob,
+  createOneOffJob,
   listUserJobs,
   pauseUserJob,
   resumeUserJob,

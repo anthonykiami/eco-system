@@ -3,7 +3,7 @@ import { requireActiveUser } from "@/lib/auth/session";
 import { getUser } from "@/lib/db/queries";
 import type { ScheduledJob } from "@/lib/db/schema";
 import { listUserJobs } from "@/lib/heartbeat";
-import { BRIEFING_PROMPT, DAY_PRESETS, describeCron } from "@/lib/heartbeat/briefing";
+import { BRIEFING_PROMPT, DAY_PRESETS, describeJob } from "@/lib/heartbeat/briefing";
 import { addBriefing, addTask, changeJob } from "./actions";
 
 const ERRORS: Record<string, string> = {
@@ -97,9 +97,10 @@ export default async function SchedulesPage({ searchParams }: PageProps<"/settin
               <div>
                 <p className="font-medium">{jobTitle(job)}</p>
                 <p className="text-sm text-neutral-500">
-                  {describeCron(job.cronExpression)}
-                  {" · "}
-                  {job.enabled && job.nextRunAt ? `next ${formatRun(job.nextRunAt)}` : "paused"}
+                  {describeJob(job, timezone)}
+                  {job.kind === "recurring" &&
+                    ` · ${job.enabled && job.nextRunAt ? `next ${formatRun(job.nextRunAt)}` : "paused"}`}
+                  {job.kind !== "recurring" && !job.enabled && " · paused"}
                   {job.lastRunAt && ` · last ran ${formatRun(job.lastRunAt)}`}
                 </p>
               </div>

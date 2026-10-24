@@ -30,6 +30,11 @@ export const userStatus = pgEnum("user_status", ["active", "waitlist"]);
 export const agentRole = pgEnum("agent_role", ["primary", "specialized"]);
 export const chatChannel = pgEnum("chat_channel", ["web", "telegram"]);
 export const messageRole = pgEnum("message_role", ["user", "assistant", "system", "tool"]);
+/**
+ * recurring: runs on its cron schedule. once: runs the agent a single time at next_run_at, then
+ * is deleted. reminder: sends its prompt to the user verbatim at next_run_at, then is deleted.
+ */
+export const jobKind = pgEnum("job_kind", ["recurring", "once", "reminder"]);
 
 // ─── Users + Auth.js adapter tables ─────────────────────────────────────────
 
@@ -149,6 +154,8 @@ export const scheduledJobs = pgTable(
     agentId: text("agent_id")
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
+    kind: jobKind("kind").notNull().default("recurring"),
+    /** For one-offs, a yearly cron for the local date and time; next_run_at holds the actual instant. */
     cronExpression: text("cron_expression").notNull(),
     prompt: text("prompt").notNull(),
     enabled: boolean("enabled").notNull().default(true),

@@ -68,6 +68,7 @@ export const HELP = [
   "<b>Scheduled tasks</b>",
   "/tasks — see, pause or run your tasks · /newtask — schedule one",
   "/briefing — get a morning briefing",
+  "Or just ask: “remind me to call mom at 6pm”, “every Monday at 9, check my inbox”.",
   "",
   "<b>Account</b>",
   "/connections — your connected accounts (Gmail, Calendar…)",
@@ -184,3 +185,5 @@ export const NO_TASKS =
 export const TASK_QUEUED = "Queued. The result arrives here within a few minutes.";
 
 export const TASK_PAUSED_CANT_RUN = "Resume the task before running it.";
+
+export const TASK_TIME_PASSED = "Its time has already passed. Delete it, or ask for a new one.";

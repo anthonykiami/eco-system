@@ -11,6 +11,7 @@ const NOTICE_TTL_SECONDS = 24 * 60 * 60;
 
 export type RunJobResult =
   | { status: "ran"; chatId: string }
+  | { status: "reminded" }
   | { status: "locked" }
   | { status: "skipped"; reason: "not_found" | "disabled" | "already_ran" }
   | { status: "skipped"; reason: "budget_exceeded" | "rate_limited"; notified: boolean };
@@ -40,6 +41,15 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
     }
 
     const user = await q.getUser(userId);
+
+    // A reminder is the user's own words sent back at the set time; no agent runs.
+    if (job.kind === "reminder") {
+      await q.markJobRun(userId, jobId, { lastRunAt: new Date() });
+      if (user?.telegramChatId) await deliver(jobId, user.telegramChatId, `⏰ ${job.prompt}`);
+      await q.deleteJob(userId, jobId);
+      return { status: "reminded" };
+    }
+
     let result: { text: string; chatId: string };
     try {
       result = await runAgent({
@@ -63,20 +73,26 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
     // Record the run before delivery so a Telegram failure never triggers a re-run.
     await q.markJobRun(userId, jobId, { lastRunAt: new Date(), nextRunAt: job.nextRunAt });
     if (user?.telegramChatId) {
-      try {
-        // Like replies in a live chat, a specialist's result says who it's from.
-        const agent = await q.getAgent(userId, job.agentId);
-        const text = agent?.role === "specialized" ? `**${agent.name}**\n${result.text}` : result.text;
-        await sendTelegramMessage(user.telegramChatId, text);
-      } catch (err) {
-        console.error(`[jobs/run] failed to deliver job ${jobId} to Telegram`, err);
-      }
+      // Like replies in a live chat, a specialist's result says who it's from.
+      const agent = await q.getAgent(userId, job.agentId);
+      const text = agent?.role === "specialized" ? `**${agent.name}**\n${result.text}` : result.text;
+      await deliver(jobId, user.telegramChatId, text);
     }
+    if (job.kind === "once") await q.deleteJob(userId, jobId);
     return { status: "ran", chatId: result.chatId };
   } finally {
     await redis.eval(RELEASE_LOCK, [jobLockKey(jobId)], [token]).catch((err: unknown) => {
       console.error(`[jobs/run] failed to release lock for job ${jobId}`, err);
     });
+  }
+}
+
+/** Sends a job's output to Telegram. A failed send is logged, never retried, so the job can't run twice. */
+async function deliver(jobId: string, telegramChatId: string, text: string): Promise<void> {
+  try {
+    await sendTelegramMessage(telegramChatId, text);
+  } catch (err) {
+    console.error(`[jobs/run] failed to deliver job ${jobId} to Telegram`, err);
   }
 }
 

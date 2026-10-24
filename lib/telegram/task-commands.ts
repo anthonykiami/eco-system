@@ -14,6 +14,7 @@ import {
   DAY_PRESETS,
   dailyCron,
   describeCron,
+  describeJob,
   type DayPreset,
 } from "@/lib/heartbeat/briefing";
 import { answerCallback, editHtml, sendHtml } from "./api";
@@ -42,6 +43,13 @@ function taskStatus(job: ScheduledJob, timezone: string): string {
   return job.nextRunAt ? `next ${formatRunTime(job.nextRunAt, timezone)}` : "not scheduled";
 }
 
+/** "Weekdays at 07:30 · next Mon 7:30 AM", or for a one-off just when it happens. */
+function scheduleLine(job: ScheduledJob, timezone: string): string {
+  const when = describeJob(job, timezone);
+  if (job.kind !== "recurring") return job.enabled ? when : `${when} · paused`;
+  return `${when} · ${taskStatus(job, timezone)}`;
+}
+
 // ─── Views ──────────────────────────────────────────────────────────────────
 
 async function listView(c: BotContext): Promise<{ html: string; keyboard: InlineKeyboard }> {
@@ -54,7 +62,7 @@ async function listView(c: BotContext): Promise<{ html: string; keyboard: Inline
 
   const lines = jobs.map(
     (job, i) =>
-      `${i + 1}. <b>${escapeHtml(taskTitle(job))}</b>\n    ${describeCron(job.cronExpression)} · ${taskStatus(job, c.user.timezone)}`,
+      `${i + 1}. <b>${escapeHtml(taskTitle(job))}</b>\n    ${scheduleLine(job, c.user.timezone)}`,
   );
   return {
     html: ["<b>Scheduled tasks</b>", "", ...lines, "", "Tap a task to pause, run or delete it."].join("\n"),
@@ -71,7 +79,7 @@ function cardView(c: BotContext, job: ScheduledJob, agents: Agent[]): { html: st
   const agent = agents.find((a) => a.id === job.agentId);
   const lines = [
     `<b>${escapeHtml(taskTitle(job))}</b>`,
-    `${describeCron(job.cronExpression)} · ${taskStatus(job, c.user.timezone)}`,
+    scheduleLine(job, c.user.timezone),
   ];
   if (agents.length > 1 && agent) lines.push(`Done by <b>${escapeHtml(agent.name)}</b>`);
   if (!isBriefing(job)) lines.push("", escapeHtml(job.prompt));
@@ -110,8 +118,8 @@ export async function sendTaskConfirmation(c: BotContext, jobId: string): Promis
   const agents = await loadAgents(c.user.id);
   const agent = agents.find((a) => a.id === job.agentId);
   const lines = [
-    `🗓 <b>New scheduled task</b>${agents.length > 1 && agent ? ` for <b>${escapeHtml(agent.name)}</b>` : ""}`,
-    `${describeCron(job.cronExpression)} (${escapeHtml(c.user.timezone)})`,
+    `🗓 <b>New ${job.kind === "once" ? "one-off" : "scheduled"} task</b>${agents.length > 1 && agent ? ` for <b>${escapeHtml(agent.name)}</b>` : ""}`,
+    `${describeJob(job, c.user.timezone)} (${escapeHtml(c.user.timezone)})`,
     "",
     isBriefing(job) ? "☀️ Morning briefing" : escapeHtml(job.prompt),
     "",
@@ -179,6 +187,7 @@ export async function handleTaskButton(
       break;
     case "tr":
       current = await resumeUserJob(userId, job.id);
+      if (!current) toast = msg.TASK_TIME_PASSED;
       break;
     case "tn":
       toast = (await runUserJobNow(userId, job.id)) ? msg.TASK_QUEUED : msg.TASK_PAUSED_CANT_RUN;

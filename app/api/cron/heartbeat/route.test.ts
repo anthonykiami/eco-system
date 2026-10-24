@@ -110,6 +110,36 @@ describe("POST /api/cron/heartbeat: fan-out", () => {
   });
 });
 
+describe("POST /api/cron/heartbeat: one-offs", () => {
+  const jobIdOf = (req: unknown) => (req as { body: { jobId: string } }).body.jobId;
+  const publishedFor = (jobId: string) => fake.qstash.publishJSON.mock.calls.filter(([req]) => jobIdOf(req) === jobId);
+
+  it("publishes a due one-off once and never again, and hands it back if publishing fails", async () => {
+    const { user, agent } = await seedUser("oneoff@example.com");
+    const job = await q.createJob(user.id, {
+      agentId: agent.id, kind: "reminder", cronExpression: "0 15 25 10 *", prompt: "call mom", nextRunAt: minutesAgo(1),
+    });
+
+    const publish = fake.qstash.publishJSON.getMockImplementation()!;
+    fake.qstash.publishJSON.mockImplementation(async (req) => {
+      if (jobIdOf(req) === job.id) throw new Error("qstash down");
+      return publish(req);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await POST(qstashRequest(PATH, {}));
+    expect((await q.getJob(user.id, job.id))!.nextRunAt).toEqual(job.nextRunAt);
+
+    fake.qstash.publishJSON.mockImplementation(publish);
+    fake.qstash.publishJSON.mockClear();
+    await POST(qstashRequest(PATH, {}));
+    expect(publishedFor(job.id)).toHaveLength(1);
+    expect((await q.getJob(user.id, job.id))!.nextRunAt).toBeNull();
+
+    await POST(qstashRequest(PATH, {}));
+    expect(publishedFor(job.id)).toHaveLength(1);
+  });
+});
+
 function hourIn(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
 }

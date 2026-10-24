@@ -1,3 +1,5 @@
+import type { ScheduledJob } from "@/lib/db/schema";
+
 /** Presets and helpers for the scheduled-tasks settings page. */
 
 export const BRIEFING_PROMPT = `Write my morning briefing for today. I'll read it on my phone, so keep it to about a minute of reading.
@@ -53,4 +55,34 @@ export function describeCron(cron: string): string {
 export function briefingPrompt(extra: string): string {
   const trimmed = extra.trim();
   return trimmed ? `${BRIEFING_PROMPT}\n\nAlso: ${trimmed}` : BRIEFING_PROMPT;
+}
+
+/** "2026-10-25" + "15:00" → "0 15 25 10 *": the yearly cron matching a one-off's local date and time. */
+export function onceCron(date: string, time: string): string | undefined {
+  const day = /^\d{4}-(\d{2})-(\d{2})$/.exec(date);
+  const daily = dailyCron(time, "daily");
+  if (!day || !daily) return undefined;
+  return daily.replace(/\* \* \*$/, `${Number(day[2])} ${Number(day[1])} *`);
+}
+
+/** "Sat, Oct 25, 3:00 PM" in the user's timezone. */
+export function formatOneOff(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+/** When a job runs, for lists: "Weekdays at 07:30", "Once, Sat, Oct 25, 3:00 PM" or "Reminder, …". */
+export function describeJob(
+  job: Pick<ScheduledJob, "kind" | "cronExpression" | "nextRunAt">,
+  timezone: string,
+): string {
+  if (job.kind === "recurring") return describeCron(job.cronExpression);
+  const when = job.nextRunAt ? formatOneOff(job.nextRunAt, timezone) : "already sent";
+  return `${job.kind === "reminder" ? "Reminder" : "Once"}, ${when}`;
 }

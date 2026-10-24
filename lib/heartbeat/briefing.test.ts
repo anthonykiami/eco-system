@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BRIEFING_PROMPT, briefingPrompt, dailyCron, describeCron, weeklyCron } from "./briefing";
+import { BRIEFING_PROMPT, briefingPrompt, dailyCron, describeCron, describeJob, onceCron, weeklyCron } from "./briefing";
 import { isValidSchedule } from "./schedule";
 
 describe("dailyCron", () => {
@@ -51,5 +51,26 @@ describe("briefingPrompt", () => {
   it("appends the user's additions only when given", () => {
     expect(briefingPrompt("  ")).toBe(BRIEFING_PROMPT);
     expect(briefingPrompt("Include NBA scores.")).toBe(`${BRIEFING_PROMPT}\n\nAlso: Include NBA scores.`);
+  });
+});
+
+describe("one-off helpers", () => {
+  it("onceCron builds a yearly cron for a local date and time", () => {
+    expect(onceCron("2026-10-25", "15:05")).toBe("5 15 25 10 *");
+    expect(onceCron("25/10/2026", "15:05")).toBeUndefined();
+    expect(onceCron("2026-10-25", "25:00")).toBeUndefined();
+  });
+
+  it("describeJob shows one-offs by their moment and recurring jobs by their pattern", () => {
+    const at = new Date("2026-10-25T19:00:00Z");
+    expect(describeJob({ kind: "reminder", cronExpression: "0 15 25 10 *", nextRunAt: at }, "America/New_York")).toBe(
+      "Reminder, Sun, Oct 25, 3:00 PM",
+    );
+    expect(describeJob({ kind: "once", cronExpression: "0 15 25 10 *", nextRunAt: null }, "UTC")).toBe(
+      "Once, already sent",
+    );
+    expect(describeJob({ kind: "recurring", cronExpression: "30 7 * * 1-5", nextRunAt: at }, "UTC")).toBe(
+      "Weekdays at 07:30",
+    );
   });
 });

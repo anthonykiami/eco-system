@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { NotFoundError, updateUser } from "@/lib/db/queries";
 import {
+  createOneOffJob,
   createUserJob,
   deleteUserJob,
   listUserJobs,
@@ -9,7 +10,7 @@ import {
   resumeUserJob,
   runUserJobNow,
 } from "./jobs";
-import { InvalidScheduleError } from "./schedule";
+import { InvalidScheduleError, PastTimeError } from "./schedule";
 import { seedUser } from "./testing";
 
 vi.mock("@/lib/db", async () => (await import("@/test/db")).createTestDbModule());
@@ -78,5 +79,58 @@ describe("lib/heartbeat user job helpers", () => {
     const [moved] = await listUserJobs(user.id);
     expect(moved.id).toBe(job.id);
     expect(localTime(moved.nextRunAt!, "America/Los_Angeles")).toBe("07:00");
+  });
+
+  describe("one-offs", () => {
+    const localDate = (d: Date, timeZone: string) =>
+      new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+    const tomorrow = (timeZone: string) => localDate(new Date(Date.now() + 86_400_000), timeZone);
+
+    it("run at the requested local moment and keep it while switched off", async () => {
+      const { user, agent } = await seedUser("oneoff-a@example.com", { timezone: "Asia/Tokyo" });
+      const date = tomorrow("Asia/Tokyo");
+      const job = await createOneOffJob(
+        user.id,
+        { agentId: agent.id, kind: "once", prompt: "check flights", date, time: "15:00" },
+        { enabled: false },
+      );
+
+      expect(job).toMatchObject({ kind: "once", enabled: false });
+      expect(localDate(job.nextRunAt!, "Asia/Tokyo")).toBe(date);
+      expect(localTime(job.nextRunAt!, "Asia/Tokyo")).toBe("15:00");
+
+      const resumed = await resumeUserJob(user.id, job.id);
+      expect(resumed).toMatchObject({ enabled: true, nextRunAt: job.nextRunAt });
+
+      // A timezone change doesn't move it.
+      await updateUser(user.id, { timezone: "Europe/London" });
+      await rescheduleUserJobs(user.id);
+      expect((await listUserJobs(user.id))[0].nextRunAt).toEqual(job.nextRunAt);
+    });
+
+    it("refuse a moment that has passed and an impossible date", async () => {
+      const { user, agent } = await seedUser("oneoff-b@example.com");
+      const yesterday = localDate(new Date(Date.now() - 86_400_000), "UTC");
+      const input = { agentId: agent.id, kind: "reminder" as const, prompt: "x", time: "09:00" };
+      await expect(createOneOffJob(user.id, { ...input, date: yesterday })).rejects.toBeInstanceOf(PastTimeError);
+      await expect(createOneOffJob(user.id, { ...input, date: "2026-13-45" })).rejects.toBeInstanceOf(
+        InvalidScheduleError,
+      );
+    });
+
+    it("can't be turned on once their time has passed", async () => {
+      const { user, agent } = await seedUser("oneoff-c@example.com");
+      const job = await createOneOffJob(
+        user.id,
+        { agentId: agent.id, kind: "once", prompt: "x", date: tomorrow("UTC"), time: "09:00" },
+        { enabled: false },
+      );
+      vi.useFakeTimers({ now: job.nextRunAt!.getTime() + 60_000, toFake: ["Date"] });
+      try {
+        expect(await resumeUserJob(user.id, job.id)).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

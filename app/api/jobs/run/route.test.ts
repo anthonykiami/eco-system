@@ -167,6 +167,40 @@ describe("POST /api/jobs/run: running", () => {
   });
 });
 
+describe("POST /api/jobs/run: one-offs", () => {
+  async function seedOneOff(email: string, kind: "once" | "reminder", prompt: string) {
+    const { user, agent } = await seedUser(email, { telegramChatId: `tg-${email}` });
+    const job = await q.createJob(user.id, {
+      agentId: agent.id, kind, cronExpression: "0 15 25 10 *", prompt, nextRunAt: null,
+    });
+    const message = { jobId: job.id, userId: user.id, scheduledFor: new Date(Date.now() - 60_000).toISOString() };
+    return { user, job, message };
+  }
+
+  it("a reminder sends its text verbatim without running an agent, then is gone", async () => {
+    const { user, job, message } = await seedOneOff("remind@example.com", "reminder", "Call mom");
+
+    const res = await POST(qstashRequest(PATH, message));
+
+    expect(await res.json()).toEqual({ status: "reminded" });
+    expect(agents.runAgent).not.toHaveBeenCalled();
+    expect(sentTexts()).toEqual([{ chat_id: "tg-remind@example.com", text: "⏰ Call mom" }]);
+    expect(await q.getJob(user.id, job.id)).toBeUndefined();
+  });
+
+  it("a one-off task runs the agent once and is then deleted", async () => {
+    const { user, job, message } = await seedOneOff("once@example.com", "once", "check flights");
+
+    expect(await (await POST(qstashRequest(PATH, message))).json()).toMatchObject({ status: "ran" });
+
+    expect(agents.runAgent).toHaveBeenCalledTimes(1);
+    expect(sentTexts()).toEqual([{ chat_id: "tg-once@example.com", text: "check flights" }]);
+    expect(await q.getJob(user.id, job.id)).toBeUndefined();
+    // QStash redelivering the same message finds nothing to run.
+    expect(await (await POST(qstashRequest(PATH, message))).json()).toMatchObject({ reason: "not_found" });
+  });
+});
+
 describe("POST /api/jobs/run: budget and rate limits", () => {
   it("budget exceeded skips the run, returns 200 and notifies via Telegram at most once per day", async () => {
     const { user, job, message } = await seedJob("broke@example.com", "tg-broke");
