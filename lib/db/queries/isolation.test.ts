@@ -27,6 +27,7 @@ async function seedUser(email: string): Promise<Fixture> {
     nextRunAt: new Date(Date.now() - 60_000),
   });
   await q.incrementUsage(user.id, MONTH, { inputTokens: 100, outputTokens: 50 });
+  await q.setIntegrationAccess(user.id, "GMAIL", "read");
   return { userId: user.id, agent, chat, message, job };
 }
 
@@ -50,6 +51,7 @@ async function expectBUntouched() {
     messageCount: 1,
   });
   expect(await q.getUser(b.userId)).toMatchObject({ email: "bob@example.com", telegramChatId: null });
+  expect(await q.listIntegrationAccess(b.userId)).toMatchObject([{ toolkit: "GMAIL", access: "read" }]);
 }
 
 describe("per-user isolation in lib/db/queries", () => {
@@ -85,6 +87,10 @@ describe("per-user isolation in lib/db/queries", () => {
     it("usage", async () => {
       expect((await q.listUsage(a.userId)).every((u) => u.userId === a.userId)).toBe(true);
       expect((await q.getUsage(a.userId, MONTH))?.userId).toBe(a.userId);
+    });
+
+    it("integration access", async () => {
+      expect((await q.listIntegrationAccess(a.userId)).every((x) => x.userId === a.userId)).toBe(true);
     });
   });
 
@@ -128,6 +134,12 @@ describe("per-user isolation in lib/db/queries", () => {
     it("usage: incrementing A never touches B", async () => {
       await q.incrementUsage(a.userId, MONTH, { inputTokens: 1, outputTokens: 1 });
       expect((await q.getUsage(a.userId, MONTH))?.messageCount).toBe(2);
+      await expectBUntouched();
+    });
+
+    it("integration access: A's changes never touch B", async () => {
+      await q.setIntegrationAccess(a.userId, "GMAIL", "full");
+      expect(await q.listIntegrationAccess(a.userId)).toMatchObject([{ toolkit: "GMAIL", access: "full" }]);
       await expectBUntouched();
     });
 

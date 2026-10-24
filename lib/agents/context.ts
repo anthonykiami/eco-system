@@ -12,6 +12,8 @@ export type RunContext = TraceContext & {
   timezone: string;
   /** Picks the models, tools and step budget for every call in the run. */
   plan: Plan;
+  /** Limits on the user's connected integrations, stated to every agent in the run. Set once tools load. */
+  integrationNotes: string[];
   /** Accumulates tokens across every model call in the run; recorded to the usage table at the end. */
   usage: TokenUsage;
 };

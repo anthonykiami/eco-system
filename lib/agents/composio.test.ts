@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ToolSet } from "ai";
 import {
   disconnectToolkit,
+  isAccessLevel,
   isToolkitSlug,
   listToolkitConnections,
+  loadComposioTools,
+  resolveAccess,
   startToolkitConnection,
   TOOLKITS,
 } from "./composio";
@@ -13,14 +17,18 @@ const mocks = vi.hoisted(() => ({
   link: vi.fn(),
   authList: vi.fn(),
   authCreate: vi.fn(),
+  createSession: vi.fn(),
+  listAccess: vi.fn(),
 }));
 
 vi.mock("@composio/core", () => ({
   Composio: class {
     connectedAccounts = { list: mocks.list, delete: mocks.del, link: mocks.link };
     authConfigs = { list: mocks.authList, create: mocks.authCreate };
+    create = mocks.createSession;
   },
 }));
+vi.mock("@/lib/db/queries", () => ({ listIntegrationAccess: mocks.listAccess }));
 vi.mock("@composio/vercel", () => ({ VercelProvider: class {} }));
 
 const ACCOUNT = { id: "ca_1", status: "ACTIVE", toolkit: { slug: "gmail" } };
@@ -31,13 +39,93 @@ beforeEach(() => {
   mocks.link.mockReset().mockResolvedValue({ id: "ca_2", redirectUrl: "https://oauth.example" });
   mocks.authList.mockReset().mockResolvedValue({ items: [{ id: "ac_existing" }] });
   mocks.authCreate.mockReset().mockResolvedValue({ id: "ac_new" });
+  mocks.listAccess.mockReset().mockResolvedValue([]);
+  mocks.createSession.mockReset().mockResolvedValue({ tools: async () => toolsNamed(EVERY_GMAIL_TOOL) });
 });
+
+/** What Composio might hand back if it ignored our restrictions entirely. */
+const EVERY_GMAIL_TOOL = [
+  "GMAIL_FETCH_EMAILS",
+  "GMAIL_CREATE_EMAIL_DRAFT",
+  "GMAIL_SEND_EMAIL",
+  "GMAIL_REPLY_TO_THREAD",
+  "GMAIL_SEND_DRAFT",
+  "GMAIL_DELETE_MESSAGE",
+  "COMPOSIO_MULTI_EXECUTE_TOOL",
+];
+const toolsNamed = (names: string[]): ToolSet =>
+  Object.fromEntries(names.map((n) => [n, { description: n, inputSchema: {} } as unknown as ToolSet[string]]));
+const savedGmail = (access: string) => mocks.listAccess.mockResolvedValue([{ toolkit: "GMAIL", access }]);
 
 describe("toolkit catalog", () => {
   it("accepts only known slugs", () => {
     expect(isToolkitSlug("GMAIL")).toBe(true);
     expect(isToolkitSlug("gmail")).toBe(false);
     expect(isToolkitSlug("SLACK")).toBe(false);
+  });
+});
+
+describe("access levels", () => {
+  it("falls back to the toolkit default for missing or retired levels", () => {
+    expect(resolveAccess("GMAIL").id).toBe("draft");
+    expect(resolveAccess("GMAIL", "retired-level").id).toBe("draft");
+    expect(resolveAccess("GMAIL", "full").id).toBe("full");
+    expect(resolveAccess("GOOGLECALENDAR").id).toBe("edit");
+  });
+
+  it("validates level ids per toolkit", () => {
+    expect(isAccessLevel("GMAIL", "draft")).toBe(true);
+    expect(isAccessLevel("GOOGLECALENDAR", "draft")).toBe(false);
+  });
+
+  it("no restricted level allows sending or deleting", () => {
+    for (const toolkit of TOOLKITS) {
+      for (const level of toolkit.access) {
+        if (!("tools" in level)) continue;
+        expect(level.tools.filter((t) => /SEND|DELETE|FORWARD|REPLY|TRASH|ACL/.test(t))).toEqual([]);
+      }
+    }
+  });
+});
+
+describe("loadComposioTools", () => {
+  it("defaults Gmail to read and draft: no sending, even if Composio returns send tools", async () => {
+    const { tools, notes } = await loadComposioTools("user-1");
+
+    expect(Object.keys(tools).sort()).toEqual(["GMAIL_CREATE_EMAIL_DRAFT", "GMAIL_FETCH_EMAILS"]);
+    expect(notes).toEqual([expect.stringMatching(/drafts-only/)]);
+    const [userId, config] = mocks.createSession.mock.calls[0];
+    expect(userId).toBe("user-1");
+    expect(config.sessionPreset).toBe("direct_tools");
+    expect(config.tools.gmail.enable).toContain("GMAIL_CREATE_EMAIL_DRAFT");
+    expect(config.tools.gmail.enable).not.toContain("GMAIL_SEND_EMAIL");
+  });
+
+  it("read only withholds drafting too", async () => {
+    savedGmail("read");
+    const { tools } = await loadComposioTools("user-1");
+    expect(Object.keys(tools)).toEqual(["GMAIL_FETCH_EMAILS"]);
+  });
+
+  it("full access passes everything and asks Composio for no restriction", async () => {
+    savedGmail("full");
+    const { tools, notes } = await loadComposioTools("user-1");
+
+    expect(Object.keys(tools).sort()).toEqual([...EVERY_GMAIL_TOOL].sort());
+    expect(notes).toEqual([]);
+    expect(mocks.createSession.mock.calls[0][1].tools).toEqual({});
+  });
+
+  it("ignores toolkits outside the catalog", async () => {
+    mocks.list.mockResolvedValue({ items: [{ id: "ca_9", status: "ACTIVE", toolkit: { slug: "github" } }] });
+    expect(await loadComposioTools("user-1")).toEqual({ tools: {}, notes: [] });
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("returns no tools when Composio refuses the session", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.createSession.mockRejectedValue(new Error("403 session_management"));
+    expect(await loadComposioTools("user-1")).toEqual({ tools: {}, notes: [] });
   });
 });
 
@@ -49,8 +137,10 @@ describe("listToolkitConnections", () => {
     expect(list.find((t) => t.slug === "GMAIL")).toMatchObject({
       status: "ACTIVE",
       connectedAccountId: "ca_1",
+      currentAccess: "draft",
     });
     expect(list.find((t) => t.slug === "GOOGLECALENDAR")?.status).toBeUndefined();
+    expect(mocks.listAccess).toHaveBeenCalledWith("user-1");
   });
 
   it("prefers the active connection over an abandoned attempt", async () => {

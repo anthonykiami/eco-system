@@ -26,12 +26,23 @@ Use this for anything relative: "today", "tomorrow", "this week", scheduling, an
 </situation>`;
 }
 
+/** What the user's integration settings don't allow, so the agent explains rather than retries. */
+export function buildIntegrationLimits(notes: string[]): string | undefined {
+  if (notes.length === 0) return undefined;
+  return `<integration_limits>
+The user chose these limits for their connected accounts. Respect them, and never try to work around them.
+${notes.map((n) => `- ${n}`).join("\n")}
+</integration_limits>`;
+}
+
 export function buildSystemPrompt(
   soul: string,
   memories: string[],
-  { timezone, now }: { timezone: string; now?: Date },
+  { timezone, now, integrationNotes = [] }: { timezone: string; now?: Date; integrationNotes?: string[] },
 ): string {
   const parts = [soul, buildSituation(timezone, now)];
+  const limits = buildIntegrationLimits(integrationNotes);
+  if (limits) parts.push(limits);
   if (memories.length > 0) {
     parts.push(`<memories>
 Things you remember about the user from earlier conversations. Use them when relevant; don't recite them.
@@ -69,7 +80,10 @@ export async function runAgentTurn({
 
   const result = await generateText({
     model: agentModel(ctx.plan),
-    system: buildSystemPrompt(agent.soul, memories, { timezone: ctx.timezone }),
+    system: buildSystemPrompt(agent.soul, memories, {
+      timezone: ctx.timezone,
+      integrationNotes: ctx.integrationNotes,
+    }),
     messages: [...toModelMessages(history), { role: "user", content: message }],
     tools,
     stopWhen: stepCountIs(PLAN_LIMITS[ctx.plan].maxSteps),

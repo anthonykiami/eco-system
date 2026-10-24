@@ -4,10 +4,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   disconnectToolkit,
+  isAccessLevel,
   isToolkitSlug,
   startToolkitConnection,
 } from "@/lib/agents/composio";
 import { requireActiveUser } from "@/lib/auth/session";
+import { setIntegrationAccess } from "@/lib/db/queries";
 import { env } from "@/lib/env";
 
 const SETTINGS_PATH = "/settings/integrations";
@@ -44,4 +46,16 @@ export async function removeToolkit(formData: FormData) {
     redirect(`${SETTINGS_PATH}?error=disconnect`);
   }
   revalidatePath(SETTINGS_PATH);
+}
+
+/** Saves how much the agent may do with one toolkit. Takes effect on the next agent run. */
+export async function setToolkitAccess(formData: FormData) {
+  const session = await requireActiveUser();
+  const slug = String(formData.get("slug") ?? "");
+  const access = String(formData.get("access") ?? "");
+  if (!isToolkitSlug(slug) || !isAccessLevel(slug, access)) redirect(`${SETTINGS_PATH}?error=access`);
+
+  await setIntegrationAccess(session.user.id, slug, access);
+  revalidatePath(SETTINGS_PATH);
+  redirect(`${SETTINGS_PATH}?saved=1`);
 }

@@ -31,3 +31,13 @@ describe("buildSystemPrompt", () => {
     expect(prompt.indexOf("SOUL")).toBeLessThan(prompt.indexOf("<situation>"));
   });
 });
+
+describe("integration limits", () => {
+  it("states the user's limits in the system prompt, and nothing when there are none", () => {
+    const note = "Gmail is drafts-only: you can't send.";
+    const withLimits = buildSystemPrompt("soul", [], { timezone: "UTC", integrationNotes: [note] });
+    expect(withLimits).toContain("<integration_limits>");
+    expect(withLimits).toContain(`- ${note}`);
+    expect(buildSystemPrompt("soul", [], { timezone: "UTC" })).not.toContain("integration_limits");
+  });
+});

@@ -5,6 +5,7 @@ import { telemetryFor } from "@/lib/tracing";
 import { addUsage, type RunContext } from "../context";
 import { PLAN_LIMITS } from "../limits";
 import { agentModel } from "../models";
+import { buildIntegrationLimits } from "../primary";
 
 /** Tool-name-safe slug; Anthropic allows [a-zA-Z0-9_-]{1,64}. */
 function slugify(name: string): string {
@@ -52,7 +53,7 @@ export async function runSpecializedAgent(
 ): Promise<string> {
   const result = await generateText({
     model: agentModel(ctx.plan),
-    system: agent.soul,
+    system: [agent.soul, buildIntegrationLimits(ctx.integrationNotes)].filter(Boolean).join("\n\n"),
     prompt: task,
     tools,
     stopWhen: stepCountIs(PLAN_LIMITS[ctx.plan].maxSteps),

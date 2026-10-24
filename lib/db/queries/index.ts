@@ -7,3 +7,4 @@ export * from "./chats";
 export * from "./messages";
 export * from "./jobs";
 export * from "./usage";
+export * from "./integrations";

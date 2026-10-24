@@ -322,9 +322,13 @@ describe("per-user isolation", () => {
     mocks.listConnectedAccounts.mockImplementation(async ({ userIds }: { userIds: string[] }) => ({
       items: userIds.flatMap((id) => (toolkitsByUser[id] ? [{ toolkit: { slug: toolkitsByUser[id] } }] : [])),
     }));
+    // A read tool from each toolkit, so it passes every access level.
+    const readTool: Record<string, string> = {
+      gmail: "GMAIL_FETCH_EMAILS",
+      googlecalendar: "GOOGLECALENDAR_EVENTS_LIST",
+    };
     mocks.createComposioSession.mockImplementation(async (_userId: string, { toolkits }: { toolkits: string[] }) => ({
-      tools: async () =>
-        Object.fromEntries(toolkits.map((slug) => [`${slug.toUpperCase()}_ACTION`, composioTool(slug)])),
+      tools: async () => Object.fromEntries(toolkits.map((slug) => [readTool[slug], composioTool(slug)])),
     }));
     mocks.utilityGenerate.mockResolvedValue(textReply(JSON.stringify({ facts: ["A fact."] })));
   });
@@ -337,7 +341,7 @@ describe("per-user isolation", () => {
     memoriesByTag[`user-${alice.userId}`] = "Alice is vegetarian.";
     memoriesByTag[`user-${bob.userId}`] = "Bob's account number is 1234.";
     toolkitsByUser[alice.userId] = "gmail";
-    toolkitsByUser[bob.userId] = "github";
+    toolkitsByUser[bob.userId] = "googlecalendar";
 
     for (const [self, other] of [
       [alice, bob],
@@ -367,8 +371,8 @@ describe("per-user isolation", () => {
 
       const ownTool = self === alice ? "delegate_to_chef" : "delegate_to_banker";
       const otherTool = self === alice ? "delegate_to_banker" : "delegate_to_chef";
-      const ownComposio = self === alice ? "GMAIL_ACTION" : "GITHUB_ACTION";
-      const otherComposio = self === alice ? "GITHUB_ACTION" : "GMAIL_ACTION";
+      const ownComposio = self === alice ? "GMAIL_FETCH_EMAILS" : "GOOGLECALENDAR_EVENTS_LIST";
+      const otherComposio = self === alice ? "GOOGLECALENDAR_EVENTS_LIST" : "GMAIL_FETCH_EMAILS";
       expect(toolNamesOf(call)).toEqual(expect.arrayContaining([ownTool, ownComposio, "search_memory"]));
       expect(toolNamesOf(call)).not.toContain(otherTool);
       expect(toolNamesOf(call)).not.toContain(otherComposio);

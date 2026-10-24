@@ -43,6 +43,7 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
     channel,
     timezone: user.timezone,
     plan: resolvePlan(user.plan),
+    integrationNotes: [],
     usage: { inputTokens: 0, outputTokens: 0 },
   };
 
@@ -52,14 +53,15 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
       const history = await listMessages(userId, chat.id, { limit: HISTORY_LIMIT });
       await addMessage(userId, { chatId: chat.id, role: "user", content: message });
 
-      const [composioTools, specialists] = await Promise.all([
+      const [composio, specialists] = await Promise.all([
         loadComposioTools(userId),
         agent.role === "primary"
           ? listAgents(userId).then((agents) => agents.filter((a) => a.role === "specialized"))
           : [],
       ]);
+      ctx.integrationNotes = composio.notes;
       // Specialists get the user's integrations and the plan's web tools, but not memory or delegation.
-      const workTools = { ...composioTools, ...webTools(ctx.plan, ctx.timezone) };
+      const workTools = { ...composio.tools, ...webTools(ctx.plan, ctx.timezone) };
       const tools = {
         ...workTools,
         ...buildMemoryTools(userId),

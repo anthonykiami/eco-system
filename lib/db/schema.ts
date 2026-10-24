@@ -179,6 +179,23 @@ export const usage = pgTable(
   ],
 );
 
+/**
+ * How much the agent may do with one connected toolkit. `access` is a level id from
+ * lib/agents/composio.ts; no row means that toolkit's default level.
+ */
+export const integrationAccess = pgTable(
+  "integration_access",
+  {
+    id: id(),
+    userId: userId(),
+    /** Composio toolkit slug, uppercase (e.g. GMAIL). */
+    toolkit: text("toolkit").notNull(),
+    access: text("access").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("integration_access_user_id_toolkit_unique").on(t.userId, t.toolkit)],
+);
+
 // ─── Inferred types ─────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
@@ -209,3 +226,5 @@ export type NewScheduledJob = typeof scheduledJobs.$inferInsert;
 
 export type Usage = typeof usage.$inferSelect;
 export type NewUsage = typeof usage.$inferInsert;
+
+export type IntegrationAccess = typeof integrationAccess.$inferSelect;
