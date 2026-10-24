@@ -99,6 +99,7 @@ describe("loadComposioTools", () => {
     const [userId, config] = mocks.createSession.mock.calls[0];
     expect(userId).toBe("user-1");
     expect(config.sessionPreset).toBe("direct_tools");
+    expect(config.connectedAccounts).toEqual({ gmail: "ca_1" });
     expect(config.tools.gmail.enable).toContain("GMAIL_CREATE_EMAIL_DRAFT");
     expect(config.tools.gmail.enable).not.toContain("GMAIL_SEND_EMAIL");
   });

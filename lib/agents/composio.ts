@@ -308,9 +308,14 @@ export async function loadComposioTools(userId: string): Promise<ComposioTools> 
     ]);
 
     const levels = new Map<ToolkitSlug, AccessLevel>();
+    // Composio's session otherwise looks for a connection on its own default auth config, which
+    // may not be the one the user connected through, and reports the toolkit as not connected.
+    const connectedAccounts: Record<string, string> = {};
     for (const account of items) {
       const slug = account.toolkit.slug.toUpperCase();
-      if (isToolkitSlug(slug)) levels.set(slug, resolveAccess(slug, saved.get(slug)));
+      if (!isToolkitSlug(slug) || levels.has(slug)) continue;
+      levels.set(slug, resolveAccess(slug, saved.get(slug)));
+      connectedAccounts[slug.toLowerCase()] = account.id;
     }
     if (levels.size === 0) return { tools: {}, notes: [] };
 
@@ -322,6 +327,7 @@ export async function loadComposioTools(userId: string): Promise<ComposioTools> 
     const session = await composio().create(userId, {
       toolkits: [...levels.keys()].map((slug) => slug.toLowerCase()),
       tools: toolsConfig,
+      connectedAccounts,
       // Expose the toolkit tools themselves, so each one can be checked against the allowlist.
       sessionPreset: "direct_tools",
       // Only expose what's already connected; don't let the agent start new OAuth flows.
