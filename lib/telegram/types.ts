@@ -15,6 +15,8 @@ export const telegramMessageSchema = z.object({
   message_id: z.number(),
   chat: telegramChatSchema,
   text: z.string().optional(),
+  /** Set when the user replies to an earlier message; only its id is read. */
+  reply_to_message: z.object({ message_id: z.number() }).optional(),
 });
 
 /** A tap on an inline keyboard button. `message` is absent for very old messages. */

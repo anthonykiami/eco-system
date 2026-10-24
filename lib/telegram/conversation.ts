@@ -2,10 +2,10 @@ import { isAgentError, runAgent } from "@/lib/agents";
 import { createChat, ensurePrimaryAgent, getOrCreateChat, listAgents } from "@/lib/db/queries";
 import type { Agent, User } from "@/lib/db/schema";
 import { findAgent, parseMention } from "./agent-handles";
-import { sendHtml, startTyping } from "./api";
+import { sendHtml, sendHtmlMessages, startTyping } from "./api";
 import { escapeHtml, markdownToTelegramHtml } from "./format";
 import * as msg from "./messages";
-import { getActiveAgentId, setActiveAgentId } from "./state";
+import { getActiveAgentId, getReplyAgentId, rememberReplyAgent, setActiveAgentId } from "./state";
 import type { InlineKeyboard } from "./types";
 
 /** Who the bot is talking to: a linked, active user in their private chat. */
@@ -38,18 +38,18 @@ export function talkKeyboard(agents: Agent[], activeId: string): InlineKeyboard 
 }
 
 /**
- * A plain message. "@name ..." sends just this message to that agent; otherwise it goes to the
- * active agent. A bare "@name" switches to that agent, like /talk.
+ * A plain message. "@name ..." sends just this message to that agent, and so does replying to one
+ * of an agent's messages; otherwise it goes to the active agent. A bare "@name" switches to that
+ * agent, like /talk.
  */
-export async function converse(c: BotContext, text: string): Promise<void> {
+export async function converse(c: BotContext, text: string, replyToMessageId?: number): Promise<void> {
   const agents = await loadAgents(c.user.id);
   const mention = agents.length > 1 ? parseMention(text) : undefined;
-  if (!mention) return replyAs(c, await activeAgent(c.user.id, agents), agents, text);
+  const match = mention && findAgent(agents, mention.handle);
 
-  const match = findAgent(agents, mention.handle);
-  if (match.status === "none") {
-    // Not one of their agents (an email handle, a username…): treat it as an ordinary message.
-    return replyAs(c, await activeAgent(c.user.id, agents), agents, text);
+  // No @, or not one of their agents (an email handle, a username…): an ordinary message.
+  if (!mention || !match || match.status === "none") {
+    return replyAs(c, await defaultAgent(c.user.id, agents, replyToMessageId), agents, text);
   }
   if (match.status === "ambiguous") return sendHtml(c.chatId, msg.ambiguousAgent(match.agents));
   if (!mention.rest) return switchTo(c, match.agent);
@@ -80,6 +80,16 @@ export async function startNewChat(c: BotContext): Promise<void> {
   const agent = await activeAgent(c.user.id, agents);
   await createChat(c.user.id, { agentId: agent.id, channel: "telegram" });
   return sendHtml(c.chatId, agents.length > 1 ? msg.newChatWith(agent) : msg.NEW_CHAT);
+}
+
+/** The agent that wrote the message being replied to, if known; else the active agent. */
+async function defaultAgent(userId: string, agents: Agent[], replyToMessageId?: number): Promise<Agent> {
+  if (replyToMessageId !== undefined && agents.length > 1) {
+    const agentId = await getReplyAgentId(userId, replyToMessageId);
+    const author = agents.find((a) => a.id === agentId);
+    if (author) return author;
+  }
+  return activeAgent(userId, agents);
 }
 
 async function replyAs(c: BotContext, agent: Agent, agents: Agent[], text: string): Promise<void> {
@@ -114,5 +124,10 @@ async function replyAs(c: BotContext, agent: Agent, agents: Agent[], text: strin
     stopTyping();
   }
   await Promise.all(notices);
-  await sendHtml(c.chatId, reply);
+  const messageIds = await sendHtmlMessages(c.chatId, reply);
+  if (agents.length > 1) {
+    await rememberReplyAgent(c.user.id, messageIds, agent.id).catch((err: unknown) =>
+      console.error("[telegram] failed to remember reply agent", err),
+    );
+  }
 }

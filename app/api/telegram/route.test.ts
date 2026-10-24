@@ -68,10 +68,14 @@ vi.mock("@/lib/agents/composio", async (importOriginal) => ({
 
 const runAgentMock = vi.mocked(runAgent);
 const listConnectionsMock = vi.mocked(listToolkitConnections);
-const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(
-  async () =>
-    new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }),
-);
+let nextMessageId = 5000;
+/** Fake Bot API: every call succeeds; sendMessage returns a fresh message_id. */
+const okResponse = async (url: string) =>
+  new Response(
+    JSON.stringify({ ok: true, result: url.endsWith("/sendMessage") ? { message_id: nextMessageId++ } : {} }),
+    { status: 200 },
+  );
+const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(okResponse);
 
 /**
  * "Latest chat" is ordered by created_at, which PGlite stores to the millisecond (Neon: microsecond).
@@ -420,9 +424,7 @@ describe("messages", () => {
 
     expect(sentTexts(chatId)).toEqual(["<b>bold</b>", "bold"]);
     fetchMock.mockReset();
-    fetchMock.mockImplementation(
-      async () => new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }),
-    );
+    fetchMock.mockImplementation(okResponse);
   });
 
   it("asks for text when a linked user sends something else", async () => {
@@ -538,6 +540,28 @@ describe("several agents", () => {
     expect(two).not.toBe(one);
     expect((await q.getChat(user.id, two!))?.agentId).toBe(specialist.id);
     expect(sentTexts(chatId)).toContain("🆕 Started a new conversation with <b>Researcher</b>.");
+  });
+
+  it("a reply to an agent's message goes to that agent", async () => {
+    const { chatId, user, primary, specialist } = await seedWithSpecialist();
+    await post(textUpdate(chatId, "@researcher find sleep papers"));
+    const researcherMessageId = nextMessageId - 1;
+    await post(textUpdate(chatId, "hello main"));
+    const mainMessageId = nextMessageId - 1;
+
+    const reply = (text: string, to: number): TelegramUpdate => {
+      const update = textUpdate(chatId, text);
+      update.message!.reply_to_message = { message_id: to };
+      return update;
+    };
+    await post(reply("more on the second one?", researcherMessageId));
+    await post(reply("and you?", mainMessageId));
+    await post(reply("unknown message", 1));
+
+    const agentIds = await Promise.all(
+      runAgentMock.mock.calls.map(async ([input]) => (await q.getChat(user.id, input.chatId!))?.agentId),
+    );
+    expect(agentIds).toEqual([specialist.id, primary.id, specialist.id, primary.id, primary.id]);
   });
 
   it("announces a delegation before the main agent's reply", async () => {

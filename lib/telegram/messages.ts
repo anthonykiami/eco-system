@@ -54,7 +54,7 @@ export const STALE_BUTTON = "That button has expired. Send the command again.";
 export const HELP = [
   "<b>Talking to your agents</b>",
   "Just send a message: your main agent answers, and hands work to your other agents when it fits.",
-  "<code>@name your message</code> sends one message straight to a specific agent.",
+  "<code>@name your message</code> sends one message straight to a specific agent. Replying to an agent's message does the same.",
   "/talk — keep talking to one agent · /main — back to the main agent",
   "/new — start a fresh conversation",
   "",

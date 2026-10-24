@@ -88,7 +88,7 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
   const flow = await getFlow(user.id);
   if (flow?.kind === "new_task") return continueTaskFlow(c, flow, text);
   if (flow) return continueAgentFlow(c, flow, text);
-  return converse(c, text);
+  return converse(c, text, message.reply_to_message?.message_id);
 }
 
 async function runCommand(c: BotContext, { name, arg }: Command, cancelledFlow: boolean): Promise<void> {

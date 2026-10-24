@@ -8,6 +8,10 @@ import { redis } from "@/lib/upstash";
 
 const activeAgentKey = (userId: string) => `tg:active-agent:${userId}`;
 const flowKey = (userId: string) => `tg:flow:${userId}`;
+const replyAgentKey = (userId: string, messageId: number) => `tg:reply-agent:${userId}:${messageId}`;
+
+/** How long a reply to an agent's message still reaches that agent. */
+export const REPLY_AGENT_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 /** An unfinished flow is forgotten after this long, so a stray message later isn't misread as an answer. */
 export const FLOW_TTL_SECONDS = 15 * 60;
@@ -42,4 +46,15 @@ export async function setFlow(userId: string, flow: Flow): Promise<void> {
 
 export async function clearFlow(userId: string): Promise<void> {
   await redis.del(flowKey(userId));
+}
+
+/** Remembers which agent wrote these bot messages, so a reply to one goes back to that agent. */
+export async function rememberReplyAgent(userId: string, messageIds: number[], agentId: string): Promise<void> {
+  await Promise.all(
+    messageIds.map((id) => redis.set(replyAgentKey(userId, id), agentId, { ex: REPLY_AGENT_TTL_SECONDS })),
+  );
+}
+
+export async function getReplyAgentId(userId: string, messageId: number): Promise<string | undefined> {
+  return (await redis.get<string>(replyAgentKey(userId, messageId))) ?? undefined;
 }

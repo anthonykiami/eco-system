@@ -45,13 +45,24 @@ const isParseError = (err: unknown) =>
 export async function sendHtml(
   chatId: number | string,
   html: string,
-  { keyboard }: { keyboard?: InlineKeyboard } = {},
+  options: { keyboard?: InlineKeyboard } = {},
 ): Promise<void> {
+  await sendHtmlMessages(chatId, html, options);
+}
+
+/** Like sendHtml, but returns the id of every message sent. */
+export async function sendHtmlMessages(
+  chatId: number | string,
+  html: string,
+  { keyboard }: { keyboard?: InlineKeyboard } = {},
+): Promise<number[]> {
   const chunks = splitTelegramHtml(html);
+  const ids: number[] = [];
   for (const [i, chunk] of chunks.entries()) {
     const markup = keyboard && i === chunks.length - 1 ? { reply_markup: keyboard } : {};
+    let sent: { message_id?: number };
     try {
-      await callTelegram("sendMessage", {
+      sent = await callTelegram("sendMessage", {
         chat_id: chatId,
         text: chunk,
         parse_mode: "HTML",
@@ -60,9 +71,11 @@ export async function sendHtml(
       });
     } catch (err) {
       if (!isParseError(err)) throw err;
-      await callTelegram("sendMessage", { chat_id: chatId, text: htmlToPlainText(chunk), ...markup });
+      sent = await callTelegram("sendMessage", { chat_id: chatId, text: htmlToPlainText(chunk), ...markup });
     }
+    if (typeof sent?.message_id === "number") ids.push(sent.message_id);
   }
+  return ids;
 }
 
 /**
