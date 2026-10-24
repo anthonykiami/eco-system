@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Agent } from "@/lib/db/schema";
-import { agentHandle, findAgent, parseMention } from "./agent-handles";
+import { agentSlug } from "@/lib/agents/naming";
+import { findAgent, parseMention } from "./agent-handles";
 
 const agent = (name: string, role: Agent["role"] = "specialized"): Agent => ({
   id: `id-${name}`,
@@ -12,12 +13,12 @@ const agent = (name: string, role: Agent["role"] = "specialized"): Agent => ({
   createdAt: new Date(),
 });
 
-describe("agentHandle", () => {
+describe("agentSlug", () => {
   it("lowercases and joins words with underscores", () => {
-    expect(agentHandle("Travel Planner")).toBe("travel_planner");
-    expect(agentHandle("  🔎 Researcher! ")).toBe("researcher");
-    expect(agentHandle("Café Bot")).toBe("cafe_bot");
-    expect(agentHandle("🤖")).toBe("agent");
+    expect(agentSlug("Travel Planner")).toBe("travel_planner");
+    expect(agentSlug("  🔎 Researcher! ")).toBe("researcher");
+    expect(agentSlug("Café Bot")).toBe("cafe_bot");
+    expect(agentSlug("🤖")).toBe("agent");
   });
 });
 

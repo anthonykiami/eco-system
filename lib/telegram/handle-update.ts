@@ -4,7 +4,7 @@ import { env } from "@/lib/env";
 import { createRatelimit } from "@/lib/upstash";
 import { showConnections, timezone, usage } from "./account-commands";
 import { continueAgentFlow, handleAgentButton, showAgents, startNewAgent } from "./agent-commands";
-import { MAIN_HANDLE } from "./agent-handles";
+import { MAIN_SLUG } from "@/lib/agents/naming";
 import { answerCallback, sendHtml } from "./api";
 import { ensureBotCommands } from "./bot-commands";
 import { converse, startNewChat, talk, type BotContext } from "./conversation";
@@ -106,7 +106,7 @@ async function runCommand(c: BotContext, { name, arg }: Command, cancelledFlow: 
     case "talk":
       return talk(c, arg);
     case "main":
-      return talk(c, MAIN_HANDLE);
+      return talk(c, MAIN_SLUG);
     case "agents":
       return showAgents(c);
     case "newagent":

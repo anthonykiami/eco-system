@@ -1,16 +1,16 @@
+import {
+  buildSpecialistSoul,
+  checkAgentName,
+  MAX_AGENT_DESCRIPTION_LENGTH,
+  MAX_SPECIALISTS,
+} from "@/lib/agents/naming";
 import { createAgent, deleteAgent, getAgent, updateAgent } from "@/lib/db/queries";
 import type { Agent } from "@/lib/db/schema";
-import { agentHandle, buildSpecialistSoul, MAIN_HANDLE } from "./agent-handles";
 import { editHtml, sendHtml } from "./api";
 import { activeAgent, loadAgents, switchTo, type BotContext } from "./conversation";
 import * as msg from "./messages";
 import { clearFlow, getActiveAgentId, setActiveAgentId, setFlow, type Flow } from "./state";
 import type { InlineKeyboard } from "./types";
-
-/** Each specialist is a delegation tool on every primary turn; this keeps the tool list sane. */
-export const MAX_SPECIALISTS = 10;
-const MAX_NAME_LENGTH = 40;
-const MAX_DESCRIPTION_LENGTH = 1000;
 
 const NEW_AGENT_BUTTON = { text: "➕ New agent", callback_data: "na" };
 
@@ -130,11 +130,10 @@ export async function startNewAgent(c: BotContext, name = ""): Promise<void> {
 
 /** An error message if `name` can't be used, ignoring the agent being renamed. */
 function nameProblem(name: string, agents: Agent[], renamingId?: string): string | undefined {
-  if (name.length < 1 || name.length > MAX_NAME_LENGTH || !/[\p{L}\p{N}]/u.test(name)) return msg.NAME_INVALID;
-  const handle = agentHandle(name);
-  if (handle === MAIN_HANDLE) return msg.NAME_RESERVED;
-  const clash = agents.find((a) => a.id !== renamingId && agentHandle(a.name) === handle);
-  return clash ? msg.nameTaken(clash) : undefined;
+  const check = checkAgentName(name, agents, renamingId);
+  if (check.ok) return undefined;
+  if (check.reason === "taken") return msg.nameTaken(check.agent);
+  return check.reason === "reserved" ? msg.NAME_RESERVED : msg.NAME_INVALID;
 }
 
 type AgentFlow = Extract<Flow, { kind: "new_agent" | "rename_agent" | "describe_agent" }>;
@@ -151,7 +150,7 @@ export async function continueAgentFlow(c: BotContext, flow: AgentFlow, text: st
   }
 
   if (flow.kind === "new_agent") {
-    if (text.length > MAX_DESCRIPTION_LENGTH) return sendHtml(c.chatId, msg.DESCRIPTION_INVALID);
+    if (text.length > MAX_AGENT_DESCRIPTION_LENGTH) return sendHtml(c.chatId, msg.DESCRIPTION_INVALID);
     // Checked again: another agent may have taken the name while this flow was open.
     const problem = nameProblem(flow.name, agents);
     if (problem) {
@@ -189,7 +188,7 @@ export async function continueAgentFlow(c: BotContext, flow: AgentFlow, text: st
     return sendHtml(c.chatId, msg.agentRenamed(updated ?? agent));
   }
 
-  if (text.length > MAX_DESCRIPTION_LENGTH) return sendHtml(c.chatId, msg.DESCRIPTION_INVALID);
+  if (text.length > MAX_AGENT_DESCRIPTION_LENGTH) return sendHtml(c.chatId, msg.DESCRIPTION_INVALID);
   const updated = await updateAgent(userId, agent.id, {
     description: text,
     soul: buildSpecialistSoul(agent.name, text),

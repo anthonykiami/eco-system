@@ -5,18 +5,8 @@ import { telemetryFor } from "@/lib/tracing";
 import { addUsage, type RunContext } from "../context";
 import { PLAN_LIMITS } from "../limits";
 import { agentModel } from "../models";
+import { agentSlug } from "../naming";
 import { buildIntegrationLimits } from "../primary";
-
-/** Tool-name-safe slug; Anthropic allows [a-zA-Z0-9_-]{1,64}. */
-function slugify(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 40) || "agent"
-  );
-}
 
 /**
  * One `delegate_to_<name>` tool per specialized agent. Each runs with its own soul as the system
@@ -26,7 +16,7 @@ function slugify(name: string): string {
 export function buildDelegationTools(ctx: RunContext, agents: Agent[], tools: ToolSet): ToolSet {
   const delegationTools: ToolSet = {};
   for (const agent of agents) {
-    let name = `delegate_to_${slugify(agent.name)}`;
+    let name = `delegate_to_${agentSlug(agent.name)}`;
     if (name in delegationTools) name = `${name}_${agent.id.slice(0, 8)}`;
 
     delegationTools[name] = tool({

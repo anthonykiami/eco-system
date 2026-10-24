@@ -13,6 +13,7 @@ import {
 } from "@/lib/db/queries";
 import type { Agent, Chat, ChatChannel } from "@/lib/db/schema";
 import { ensureTracing, flushTracing, withAgentTrace } from "@/lib/tracing";
+import { buildAgentTools } from "./agent-tools";
 import { loadComposioTools } from "./composio";
 import type { RunContext } from "./context";
 import { enforceLimits, resolvePlan } from "./limits";
@@ -64,8 +65,9 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
         ...workTools,
         ...buildMemoryTools(userId),
         ...buildDelegationTools(ctx, specialists, workTools),
-        // A scheduled run can't schedule more runs.
+        // A scheduled run can't schedule more runs or create agents.
         ...(channel === "scheduled" ? {} : buildScheduleTools(ctx, agent, agents)),
+        ...(channel !== "scheduled" && agent.role === "primary" ? buildAgentTools(userId, [...agents]) : {}),
       };
 
       const text = (await runAgentTurn({ ctx, agent, history, message, tools })).trim() || EMPTY_REPLY;

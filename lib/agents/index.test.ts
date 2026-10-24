@@ -405,6 +405,43 @@ describe("scheduled task tools", () => {
   });
 });
 
+describe("create_agent tool", () => {
+  it("lets the primary agent create a specialist the user asked for", async () => {
+    const { userId } = await seedUser("creator");
+    mocks.agentGenerate.mockImplementation(async (opts: GenerateOptions) =>
+      hasToolResult(opts)
+        ? textReply("Created Coach.")
+        : toolCallReply("create_agent", { name: "Coach", job: "Keeps me on track with workouts." }),
+    );
+
+    await runAgent({ userId, message: "Make me a fitness coach agent", channel: "telegram" });
+
+    const coach = (await q.listAgents(userId)).find((a) => a.role === "specialized");
+    expect(coach).toMatchObject({ name: "Coach", description: "Keeps me on track with workouts." });
+    expect(coach?.soul).toContain("You are Coach");
+    const toolResult = JSON.stringify(agentCalls()[1].prompt);
+    expect(toolResult).toContain("@coach");
+  });
+
+  it("refuses a duplicate or reserved name, and is only given to the primary agent outside scheduled runs", async () => {
+    const { userId } = await seedUser("dupe");
+    const coach = await q.createAgent(userId, { name: "Coach", soul: "You coach." });
+    for (const name of ["coach", "Main"]) {
+      mocks.agentGenerate.mockImplementation(async (opts: GenerateOptions) =>
+        hasToolResult(opts) ? textReply("ok") : toolCallReply("create_agent", { name, job: "x" }),
+      );
+      await runAgent({ userId, message: "new agent", channel: "telegram" });
+    }
+    expect(await q.listAgents(userId)).toHaveLength(2);
+
+    vi.clearAllMocks();
+    mocks.agentGenerate.mockResolvedValue(textReply("hi"));
+    await runAgent({ userId, message: "hi", channel: "scheduled" });
+    await runAgent({ userId, agentId: coach.id, message: "hi", channel: "telegram" });
+    for (const call of agentCalls()) expect(toolNamesOf(call)).not.toContain("create_agent");
+  });
+});
+
 describe("per-user isolation", () => {
   const memoriesByTag: Record<string, string> = {};
   const toolkitsByUser: Record<string, string> = {};
