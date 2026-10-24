@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import * as q from "@/lib/db/queries";
+import { eq } from "drizzle-orm";
 import { users } from "@/lib/db/schema";
 import { withAgentTrace } from "@/lib/tracing";
 import { BudgetExceededError, RateLimitError, runAgent } from "./index";
@@ -23,6 +24,9 @@ const mocks = vi.hoisted(() => ({
   createComposioSession: vi.fn(),
   agentGenerate: vi.fn(),
   utilityGenerate: vi.fn(),
+  agentModel: vi.fn(),
+  utilityModel: vi.fn(),
+  webTools: vi.fn(),
 }));
 
 vi.mock("@/lib/upstash", () => ({ createRatelimit: () => ({ limit: mocks.limit }) }));
@@ -46,7 +50,10 @@ vi.mock("./models", async () => {
   const { MockLanguageModelV4 } = await import("ai/test");
   const agent = new MockLanguageModelV4({ doGenerate: (opts) => mocks.agentGenerate(opts) });
   const utility = new MockLanguageModelV4({ doGenerate: (opts) => mocks.utilityGenerate(opts) });
-  return { agentModel: () => agent, utilityModel: () => utility };
+  mocks.agentModel.mockReturnValue(agent);
+  mocks.utilityModel.mockReturnValue(utility);
+  mocks.webTools.mockReturnValue({});
+  return { agentModel: mocks.agentModel, utilityModel: mocks.utilityModel, webTools: mocks.webTools };
 });
 
 // Keep the real telemetryFor; don't start OTel or export spans.
@@ -213,6 +220,45 @@ describe("a run", () => {
       outputTokens: 10,
       messageCount: 1,
     });
+  });
+});
+
+describe("plans", () => {
+  it("runs the free plan by default, with no web tools", async () => {
+    const { userId } = await seedUser("default");
+    await runAgent({ userId, message: "hi", channel: "web" });
+
+    expect(mocks.agentModel).toHaveBeenCalledWith("free");
+    expect(mocks.utilityModel).toHaveBeenCalledWith("free");
+    expect(mocks.webTools).toHaveBeenCalledWith("free", "America/New_York");
+  });
+
+  it("uses the user's plan for models, web tools and budget", async () => {
+    const { userId } = await seedUser("max");
+    await db.update(users).set({ plan: "max", timezone: "Europe/Paris" }).where(eq(users.id, userId));
+    // Over the free budget, under the max one.
+    await q.incrementUsage(userId, q.currentMonth(), {
+      inputTokens: PLAN_LIMITS.free.monthlyTokens,
+      outputTokens: 0,
+    });
+    mocks.webTools.mockReturnValueOnce({
+      web_search: tool({ description: "Search the web", inputSchema: z.object({}), execute: async () => "" }),
+    });
+
+    await runAgent({ userId, message: "what's new?", channel: "web" });
+
+    expect(mocks.agentModel).toHaveBeenCalledWith("max");
+    expect(mocks.utilityModel).toHaveBeenCalledWith("max");
+    expect(mocks.webTools).toHaveBeenCalledWith("max", "Europe/Paris");
+    expect(toolNamesOf(agentCalls()[0])).toContain("web_search");
+  });
+
+  it("treats an unknown plan name as free", async () => {
+    const { userId } = await seedUser("legacy");
+    await db.update(users).set({ plan: "enterprise-trial" }).where(eq(users.id, userId));
+    await runAgent({ userId, message: "hi", channel: "web" });
+
+    expect(mocks.agentModel).toHaveBeenCalledWith("free");
   });
 });
 

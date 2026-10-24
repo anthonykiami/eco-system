@@ -84,7 +84,7 @@ export async function rememberFacts(
 ): Promise<string[]> {
   try {
     const { output, totalUsage } = await generateText({
-      model: utilityModel(),
+      model: utilityModel(ctx.plan),
       output: Output.object({ schema: factsSchema }),
       system: FACT_EXTRACTION_PROMPT,
       prompt: `User: ${exchange.user}\n\nAssistant: ${exchange.assistant}`,

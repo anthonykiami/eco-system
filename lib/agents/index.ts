@@ -15,8 +15,9 @@ import type { Agent, Chat, ChatChannel } from "@/lib/db/schema";
 import { ensureTracing, flushTracing, withAgentTrace } from "@/lib/tracing";
 import { loadComposioTools } from "./composio";
 import type { RunContext } from "./context";
-import { enforceLimits } from "./limits";
+import { enforceLimits, resolvePlan } from "./limits";
 import { buildMemoryTools, rememberFacts } from "./memory";
+import { webTools } from "./models";
 import { runAgentTurn } from "./primary";
 import { buildDelegationTools } from "./specialized";
 import type { AgentChannel, RunAgent } from "./types";
@@ -41,6 +42,7 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
     chatId: chat.id,
     channel,
     timezone: user.timezone,
+    plan: resolvePlan(user.plan),
     usage: { inputTokens: 0, outputTokens: 0 },
   };
 
@@ -56,10 +58,12 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
           ? listAgents(userId).then((agents) => agents.filter((a) => a.role === "specialized"))
           : [],
       ]);
+      // Specialists get the user's integrations and the plan's web tools, but not memory or delegation.
+      const workTools = { ...composioTools, ...webTools(ctx.plan, ctx.timezone) };
       const tools = {
-        ...composioTools,
+        ...workTools,
         ...buildMemoryTools(userId),
-        ...buildDelegationTools(ctx, specialists, composioTools),
+        ...buildDelegationTools(ctx, specialists, workTools),
       };
 
       const text = (await runAgentTurn({ ctx, agent, history, message, tools })).trim() || EMPTY_REPLY;

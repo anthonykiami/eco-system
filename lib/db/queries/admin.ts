@@ -22,3 +22,9 @@ export async function adminSetUserStatus(
     .returning();
   return row;
 }
+
+/** `plan` must be a key of PLAN_LIMITS (lib/agents/limits.ts); the caller validates it. */
+export async function adminSetUserPlan(targetUserId: string, plan: string): Promise<User | undefined> {
+  const [row] = await db.update(users).set({ plan }).where(eq(users.id, targetUserId)).returning();
+  return row;
+}

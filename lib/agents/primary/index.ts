@@ -2,10 +2,10 @@ import { generateText, stepCountIs, type ModelMessage, type ToolSet } from "ai";
 import type { Agent, Message } from "@/lib/db/schema";
 import { telemetryFor } from "@/lib/tracing";
 import { addUsage, type RunContext } from "../context";
+import { PLAN_LIMITS } from "../limits";
 import { recallMemories } from "../memory";
 import { agentModel } from "../models";
 
-const MAX_STEPS = 10;
 /** Routes calling runAgent allow 60s; leave headroom for saving messages and memory afterwards. */
 const TURN_TIMEOUT_MS = 45_000;
 
@@ -64,11 +64,11 @@ export async function runAgentTurn({
   const memories = await recallMemories(ctx.userId, message);
 
   const result = await generateText({
-    model: agentModel(),
+    model: agentModel(ctx.plan),
     system: buildSystemPrompt(agent.soul, memories, { timezone: ctx.timezone }),
     messages: [...toModelMessages(history), { role: "user", content: message }],
     tools,
-    stopWhen: stepCountIs(MAX_STEPS),
+    stopWhen: stepCountIs(PLAN_LIMITS[ctx.plan].maxSteps),
     // Delegations receive this call's abortSignal, so they share the same budget.
     timeout: { totalMs: TURN_TIMEOUT_MS },
     ...telemetryFor(agent.role === "primary" ? "primary-agent" : `agent:${agent.name}`, ctx),

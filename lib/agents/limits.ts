@@ -8,10 +8,15 @@ export type PlanLimits = {
   messagesPerMinute: number;
   /** Input + output tokens per calendar month (UTC). */
   monthlyTokens: number;
+  /** Model steps (tool calls plus the final answer) per agent turn. */
+  maxSteps: number;
 };
 
+/** Models per plan live in ./models. A user's plan is set from the admin page. */
 export const PLAN_LIMITS = {
-  free: { messagesPerMinute: 10, monthlyTokens: 200_000 },
+  free: { messagesPerMinute: 10, monthlyTokens: 200_000, maxSteps: 10 },
+  // Generous, but still capped so a runaway loop can't drain the API account.
+  max: { messagesPerMinute: 30, monthlyTokens: 5_000_000, maxSteps: 20 },
 } as const satisfies Record<string, PlanLimits>;
 
 export type Plan = keyof typeof PLAN_LIMITS;

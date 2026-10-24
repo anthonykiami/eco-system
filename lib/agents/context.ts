@@ -1,5 +1,6 @@
 import type { LanguageModelUsage } from "ai";
 import type { TraceContext } from "@/lib/tracing";
+import type { Plan } from "./limits";
 import type { AgentChannel } from "./types";
 
 export type TokenUsage = { inputTokens: number; outputTokens: number };
@@ -9,6 +10,8 @@ export type RunContext = TraceContext & {
   channel: AgentChannel;
   /** The user's IANA timezone, so the agent can resolve "today", "tomorrow" and schedules. */
   timezone: string;
+  /** Picks the models, tools and step budget for every call in the run. */
+  plan: Plan;
   /** Accumulates tokens across every model call in the run; recorded to the usage table at the end. */
   usage: TokenUsage;
 };

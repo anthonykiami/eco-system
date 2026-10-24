@@ -3,9 +3,8 @@ import { z } from "zod";
 import type { Agent } from "@/lib/db/schema";
 import { telemetryFor } from "@/lib/tracing";
 import { addUsage, type RunContext } from "../context";
+import { PLAN_LIMITS } from "../limits";
 import { agentModel } from "../models";
-
-const MAX_SPECIALIZED_STEPS = 8;
 
 /** Tool-name-safe slug; Anthropic allows [a-zA-Z0-9_-]{1,64}. */
 function slugify(name: string): string {
@@ -52,11 +51,11 @@ export async function runSpecializedAgent(
   abortSignal?: AbortSignal,
 ): Promise<string> {
   const result = await generateText({
-    model: agentModel(),
+    model: agentModel(ctx.plan),
     system: agent.soul,
     prompt: task,
     tools,
-    stopWhen: stepCountIs(MAX_SPECIALIZED_STEPS),
+    stopWhen: stepCountIs(PLAN_LIMITS[ctx.plan].maxSteps),
     abortSignal,
     ...telemetryFor(`specialized-agent:${agent.name}`, ctx),
   });
