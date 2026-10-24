@@ -1,6 +1,7 @@
 import { env } from "@/lib/env";
 import { htmlToPlainText } from "./format";
 import { splitTelegramHtml } from "./split";
+import type { InlineKeyboard } from "./types";
 
 type TelegramResponse<T> =
   | { ok: true; result: T }
@@ -39,21 +40,62 @@ const isParseError = (err: unknown) =>
 /**
  * Sends HTML, split into as many messages as needed. If Telegram rejects a chunk's markup,
  * that chunk is re-sent as plain text so the user still gets the reply.
+ * A keyboard is attached to the last chunk, so its buttons sit under the end of the text.
  */
-export async function sendHtml(chatId: number | string, html: string): Promise<void> {
-  for (const chunk of splitTelegramHtml(html)) {
+export async function sendHtml(
+  chatId: number | string,
+  html: string,
+  { keyboard }: { keyboard?: InlineKeyboard } = {},
+): Promise<void> {
+  const chunks = splitTelegramHtml(html);
+  for (const [i, chunk] of chunks.entries()) {
+    const markup = keyboard && i === chunks.length - 1 ? { reply_markup: keyboard } : {};
     try {
       await callTelegram("sendMessage", {
         chat_id: chatId,
         text: chunk,
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
+        ...markup,
       });
     } catch (err) {
       if (!isParseError(err)) throw err;
-      await callTelegram("sendMessage", { chat_id: chatId, text: htmlToPlainText(chunk) });
+      await callTelegram("sendMessage", { chat_id: chatId, text: htmlToPlainText(chunk), ...markup });
     }
   }
+}
+
+/**
+ * Replaces a message the bot sent earlier (e.g. a card after one of its buttons is tapped).
+ * Text must fit in one message. "Message is not modified" is not an error: the card is already current.
+ */
+export async function editHtml(
+  chatId: number | string,
+  messageId: number,
+  html: string,
+  { keyboard }: { keyboard?: InlineKeyboard } = {},
+): Promise<void> {
+  try {
+    await callTelegram("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text: html,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      reply_markup: keyboard ?? { inline_keyboard: [] },
+    });
+  } catch (err) {
+    if (err instanceof TelegramApiError && /message is not modified/i.test(err.description)) return;
+    throw err;
+  }
+}
+
+/** Stops the button's loading spinner; `text` shows as a brief toast. */
+export async function answerCallback(callbackQueryId: string, text?: string): Promise<void> {
+  await callTelegram("answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    ...(text ? { text } : {}),
+  });
 }
 
 /**

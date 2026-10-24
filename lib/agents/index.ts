@@ -32,7 +32,7 @@ const EMPTY_REPLY = "Sorry, I wasn't able to finish that. Could you try rephrasi
 const toChatChannel = (channel: AgentChannel): ChatChannel =>
   channel === "telegram" ? "telegram" : "web";
 
-export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, channel }) => {
+export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, channel, onDelegate }) => {
   ensureTracing();
   const user = await enforceLimits(userId);
 
@@ -45,6 +45,7 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
     plan: resolvePlan(user.plan),
     integrationNotes: [],
     usage: { inputTokens: 0, outputTokens: 0 },
+    onDelegate,
   };
 
   try {

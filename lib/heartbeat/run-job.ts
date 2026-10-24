@@ -64,7 +64,10 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
     await q.markJobRun(userId, jobId, { lastRunAt: new Date(), nextRunAt: job.nextRunAt });
     if (user?.telegramChatId) {
       try {
-        await sendTelegramMessage(user.telegramChatId, result.text);
+        // Like replies in a live chat, a specialist's result says who it's from.
+        const agent = await q.getAgent(userId, job.agentId);
+        const text = agent?.role === "specialized" ? `**${agent.name}**\n${result.text}` : result.text;
+        await sendTelegramMessage(user.telegramChatId, text);
       } catch (err) {
         console.error(`[jobs/run] failed to deliver job ${jobId} to Telegram`, err);
       }

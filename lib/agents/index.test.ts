@@ -298,6 +298,30 @@ describe("delegation", () => {
       outputTokens: 28,
     });
   });
+
+  it("reports each delegation to onDelegate, and a throwing listener doesn't break the run", async () => {
+    const { userId } = await seedUser("watcher");
+    const researcher = await q.createAgent(userId, {
+      name: "Researcher",
+      soul: "You are a meticulous research assistant.",
+    });
+
+    mocks.agentGenerate.mockImplementation(async (opts: GenerateOptions) => {
+      if (systemOf(opts) === researcher.soul) return textReply("Found it.");
+      if (hasToolResult(opts)) return textReply("Done.");
+      return toolCallReply("delegate_to_researcher", { task: "Look it up" });
+    });
+
+    const onDelegate = vi.fn(() => {
+      throw new Error("chat notice failed");
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { text } = await runAgent({ userId, message: "Look it up", channel: "telegram", onDelegate });
+    consoleError.mockRestore();
+
+    expect(text).toBe("Done.");
+    expect(onDelegate).toHaveBeenCalledExactlyOnceWith({ id: researcher.id, name: "Researcher" });
+  });
 });
 
 describe("per-user isolation", () => {

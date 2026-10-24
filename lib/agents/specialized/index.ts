@@ -38,10 +38,22 @@ export function buildDelegationTools(ctx: RunContext, agents: Agent[], tools: To
           .string()
           .describe("A complete, self-contained description of what the agent should do, with any context it needs."),
       }),
-      execute: ({ task }, { abortSignal }) => runSpecializedAgent(ctx, agent, task, tools, abortSignal),
+      execute: ({ task }, { abortSignal }) => {
+        notifyDelegation(ctx, agent);
+        return runSpecializedAgent(ctx, agent, task, tools, abortSignal);
+      },
     });
   }
   return delegationTools;
+}
+
+/** A failing listener (e.g. a chat notice that couldn't be sent) must never break the delegation. */
+function notifyDelegation(ctx: RunContext, agent: Agent): void {
+  try {
+    ctx.onDelegate?.({ id: agent.id, name: agent.name });
+  } catch (err) {
+    console.error(`[agents] onDelegate listener failed for agent ${agent.id}`, err);
+  }
 }
 
 export async function runSpecializedAgent(

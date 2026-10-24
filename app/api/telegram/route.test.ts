@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BudgetExceededError, RateLimitError, runAgent } from "@/lib/agents";
+import { listToolkitConnections } from "@/lib/agents/composio";
 import { db } from "@/lib/db";
+import * as q from "@/lib/db/queries";
 import { getUser } from "@/lib/db/queries";
 import { users, type UserStatus } from "@/lib/db/schema";
 import { createLinkCode } from "@/lib/telegram/linking";
@@ -59,12 +61,23 @@ vi.mock("@/lib/agents", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/agents")>()),
   runAgent: vi.fn(),
 }));
+vi.mock("@/lib/agents/composio", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agents/composio")>()),
+  listToolkitConnections: vi.fn(),
+}));
 
 const runAgentMock = vi.mocked(runAgent);
+const listConnectionsMock = vi.mocked(listToolkitConnections);
 const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(
   async () =>
     new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }),
 );
+
+/**
+ * "Latest chat" is ordered by created_at, which PGlite stores to the millisecond (Neon: microsecond).
+ * Waiting a tick keeps chats created back to back from tying.
+ */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
 let nextUpdateId = 1;
 let nextChatId = 1000;
@@ -76,6 +89,15 @@ const textUpdate = (
 ): TelegramUpdate => ({
   update_id: nextUpdateId++,
   message: { message_id: 1, chat: { id: chatId, type }, text },
+});
+
+const buttonUpdate = (chatId: number, data: string, messageId = 77): TelegramUpdate => ({
+  update_id: nextUpdateId++,
+  callback_query: {
+    id: `cb${nextUpdateId}`,
+    data,
+    message: { message_id: messageId, chat: { id: chatId, type: "private" } },
+  },
 });
 
 /** POSTs to the webhook and waits for the after() work to finish. */
@@ -102,6 +124,19 @@ const sentTexts = (chatId: number) =>
   calls("sendMessage")
     .filter((b) => b.chat_id === chatId)
     .map((b) => b.text as string);
+const lastSent = (chatId: number) => sentTexts(chatId).at(-1) ?? "";
+const editedTexts = (chatId: number) =>
+  calls("editMessageText")
+    .filter((b) => b.chat_id === chatId)
+    .map((b) => b.text as string);
+/** callback_data of every button on the last message sent to this chat. */
+function lastButtons(chatId: number): { text: string; data?: string }[] {
+  const body = calls("sendMessage").filter((b) => b.chat_id === chatId).at(-1);
+  const markup = body?.reply_markup as { inline_keyboard: { text: string; callback_data?: string }[][] } | undefined;
+  return (markup?.inline_keyboard.flat() ?? []).map((b) => ({ text: b.text, data: b.callback_data }));
+}
+const buttonData = (chatId: number, label: string | RegExp) =>
+  lastButtons(chatId).find((b) => (typeof label === "string" ? b.text === label : label.test(b.text)))?.data;
 
 async function seedUser(opts: { status?: UserStatus; telegramChatId?: number } = {}) {
   const [user] = await db
@@ -304,6 +339,7 @@ describe("messages", () => {
 
     await post(textUpdate(chatId, "one"));
     await post(textUpdate(chatId, "two"));
+    await tick();
     await post(textUpdate(chatId, "/new"));
     await post(textUpdate(chatId, "three"));
 
@@ -397,5 +433,398 @@ describe("messages", () => {
 
     expect(runAgentMock).not.toHaveBeenCalled();
     expect(sentTexts(chatId)).toEqual([msg.TEXT_ONLY]);
+  });
+});
+
+// ─── Talking to several agents ──────────────────────────────────────────────
+
+async function seedWithSpecialist(name = "Researcher") {
+  const chatId = nextChatId++;
+  const user = await seedUser({ telegramChatId: chatId });
+  const primary = await q.ensurePrimaryAgent(user.id);
+  const specialist = await q.createAgent(user.id, { name, description: "Finds sources.", soul: "You research." });
+  return { chatId, user, primary, specialist };
+}
+
+describe("several agents", () => {
+  it("doesn't label replies while the user only has the main agent", async () => {
+    const chatId = nextChatId++;
+    await seedUser({ telegramChatId: chatId });
+
+    await post(textUpdate(chatId, "hi"));
+
+    expect(sentTexts(chatId)).toEqual(["echo: hi"]);
+  });
+
+  it("labels replies with the agent's name once there's more than one", async () => {
+    const { chatId, primary } = await seedWithSpecialist();
+
+    await post(textUpdate(chatId, "hi"));
+
+    expect(sentTexts(chatId)).toEqual([`<b>${primary.name}</b>\necho: hi`]);
+  });
+
+  it("@name sends one message to that agent, in that agent's own chat", async () => {
+    const { chatId, user, primary, specialist } = await seedWithSpecialist();
+
+    await post(textUpdate(chatId, "@researcher find sleep papers"));
+    await post(textUpdate(chatId, "thanks"));
+
+    const [first, second] = runAgentMock.mock.calls.map(([input]) => input);
+    expect(first.message).toBe("find sleep papers");
+    expect((await q.getChat(user.id, first.chatId!))?.agentId).toBe(specialist.id);
+    // The next plain message goes back to the main agent.
+    expect((await q.getChat(user.id, second.chatId!))?.agentId).toBe(primary.id);
+    expect(sentTexts(chatId)[0]).toBe("<b>Researcher</b>\necho: find sleep papers");
+  });
+
+  it("treats an @ that isn't one of their agents as an ordinary message", async () => {
+    const { chatId } = await seedWithSpecialist();
+
+    await post(textUpdate(chatId, "@someone said hi"));
+
+    expect(runAgentMock.mock.calls[0][0].message).toBe("@someone said hi");
+  });
+
+  it("/talk switches every following message to that agent until /main", async () => {
+    const { chatId, user, primary, specialist } = await seedWithSpecialist("Travel Planner");
+
+    await post(textUpdate(chatId, "/talk travel"));
+    expect(lastSent(chatId)).toContain("You're now talking to <b>Travel Planner</b>");
+    await post(textUpdate(chatId, "plan lisbon"));
+    await post(textUpdate(chatId, "/main"));
+    await post(textUpdate(chatId, "hi again"));
+
+    const agentIds = await Promise.all(
+      runAgentMock.mock.calls.map(async ([input]) => (await q.getChat(user.id, input.chatId!))?.agentId),
+    );
+    expect(agentIds).toEqual([specialist.id, primary.id]);
+  });
+
+  it("/talk without a name offers a button per agent, and a bare @name also switches", async () => {
+    const { chatId, specialist } = await seedWithSpecialist();
+
+    await post(textUpdate(chatId, "/talk"));
+    expect(lastButtons(chatId).map((b) => b.data)).toContain(`at:${specialist.id}`);
+
+    await post(buttonUpdate(chatId, `at:${specialist.id}`));
+    expect(lastSent(chatId)).toContain("now talking to <b>Researcher</b>");
+
+    await post(textUpdate(chatId, "/main"));
+    await post(textUpdate(chatId, "@researcher"));
+    expect(lastSent(chatId)).toContain("now talking to <b>Researcher</b>");
+    expect(runAgentMock).not.toHaveBeenCalled();
+  });
+
+  it("/talk with an unknown name lists the user's agents", async () => {
+    const { chatId } = await seedWithSpecialist();
+
+    await post(textUpdate(chatId, "/talk chef"));
+
+    expect(lastSent(chatId)).toContain("You don't have an agent called “chef”");
+    expect(lastSent(chatId)).toContain("<code>@researcher</code>");
+  });
+
+  it("/new starts a fresh conversation with the agent being talked to", async () => {
+    const { chatId, user, specialist } = await seedWithSpecialist();
+
+    await post(textUpdate(chatId, "/talk researcher"));
+    await post(textUpdate(chatId, "one"));
+    await tick();
+    await post(textUpdate(chatId, "/new"));
+    await post(textUpdate(chatId, "two"));
+
+    const [one, two] = runAgentMock.mock.calls.map(([input]) => input.chatId);
+    expect(two).not.toBe(one);
+    expect((await q.getChat(user.id, two!))?.agentId).toBe(specialist.id);
+    expect(sentTexts(chatId)).toContain("🆕 Started a new conversation with <b>Researcher</b>.");
+  });
+
+  it("announces a delegation before the main agent's reply", async () => {
+    const { chatId, specialist } = await seedWithSpecialist();
+    runAgentMock.mockImplementationOnce(async ({ chatId: id, onDelegate }) => {
+      onDelegate?.({ id: specialist.id, name: specialist.name });
+      onDelegate?.({ id: specialist.id, name: specialist.name });
+      return { text: "Here's what Researcher found.", chatId: id! };
+    });
+
+    await post(textUpdate(chatId, "research sleep"));
+
+    expect(sentTexts(chatId)).toEqual([
+      "↪️ <i>Assistant asked Researcher to help…</i>",
+      "<b>Assistant</b>\nHere's what Researcher found.",
+    ]);
+  });
+});
+
+// ─── Managing agents ────────────────────────────────────────────────────────
+
+describe("managing agents", () => {
+  it("/newagent asks for a name and a job, then creates a specialist", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+
+    await post(textUpdate(chatId, "/newagent"));
+    expect(lastSent(chatId)).toBe(msg.ASK_AGENT_NAME);
+    await post(textUpdate(chatId, "Travel Planner"));
+    expect(lastSent(chatId)).toContain("What should <b>Travel Planner</b> do?");
+    await post(textUpdate(chatId, "Plans trips and finds flights."));
+
+    const created = (await q.listAgents(user.id)).find((a) => a.role === "specialized");
+    expect(created).toMatchObject({ name: "Travel Planner", description: "Plans trips and finds flights." });
+    expect(created?.soul).toContain("You are Travel Planner");
+    expect(lastSent(chatId)).toContain("✅ Created <b>Travel Planner</b>");
+    expect(lastSent(chatId)).toContain("@travel_planner");
+    expect(runAgentMock).not.toHaveBeenCalled();
+  });
+
+  it("/newagent with a name skips straight to the job, and rejects taken or reserved names", async () => {
+    const { chatId } = await seedWithSpecialist();
+
+    await post(textUpdate(chatId, "/newagent researcher"));
+    expect(lastSent(chatId)).toContain("You already have <b>Researcher</b>");
+    await post(textUpdate(chatId, "Main"));
+    expect(lastSent(chatId)).toBe(msg.NAME_RESERVED);
+    await post(textUpdate(chatId, "Coach"));
+    expect(lastSent(chatId)).toContain("What should <b>Coach</b> do?");
+  });
+
+  it("/cancel and other commands abandon a half-finished flow", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+
+    await post(textUpdate(chatId, "/newagent"));
+    await post(textUpdate(chatId, "/cancel"));
+    expect(lastSent(chatId)).toBe(msg.CANCELLED);
+    await post(textUpdate(chatId, "Coach"));
+
+    expect(runAgentMock).toHaveBeenCalledTimes(1);
+    expect(await q.listAgents(user.id)).toHaveLength(1);
+
+    await post(textUpdate(chatId, "/cancel"));
+    expect(lastSent(chatId)).toBe(msg.NOTHING_TO_CANCEL);
+  });
+
+  it("/agents lists agents; their buttons rename, re-describe and delete", async () => {
+    const { chatId, user, specialist } = await seedWithSpecialist();
+
+    await post(textUpdate(chatId, "/agents"));
+    expect(lastSent(chatId)).toContain("<b>Your agents</b>");
+    await post(buttonUpdate(chatId, `a:${specialist.id}`));
+    expect(editedTexts(chatId).at(-1)).toContain("<b>Researcher</b>");
+
+    await post(buttonUpdate(chatId, `ar:${specialist.id}`));
+    await post(textUpdate(chatId, "Scout"));
+    let updated = await q.getAgent(user.id, specialist.id);
+    expect(updated?.name).toBe("Scout");
+    // A hand-written soul is left alone by a rename.
+    expect(updated?.soul).toBe("You research.");
+
+    await post(buttonUpdate(chatId, `ad:${specialist.id}`));
+    await post(textUpdate(chatId, "Scouts restaurants."));
+    updated = await q.getAgent(user.id, specialist.id);
+    expect(updated?.description).toBe("Scouts restaurants.");
+    expect(updated?.soul).toContain("You are Scout");
+
+    await post(textUpdate(chatId, "/talk scout"));
+    await post(buttonUpdate(chatId, `ax:${specialist.id}`));
+    expect(await q.getAgent(user.id, specialist.id)).toBeDefined();
+    await post(buttonUpdate(chatId, `ay:${specialist.id}`));
+    expect(await q.getAgent(user.id, specialist.id)).toBeUndefined();
+
+    // The deleted agent was active; messages fall back to the main agent.
+    await post(textUpdate(chatId, "hi"));
+    expect(lastSent(chatId)).toBe("echo: hi");
+  });
+
+  it("can't delete the main agent", async () => {
+    const { chatId, user, primary } = await seedWithSpecialist();
+
+    await post(buttonUpdate(chatId, `ay:${primary.id}`));
+
+    expect(await q.getAgent(user.id, primary.id)).toBeDefined();
+  });
+
+  it("ignores button ids that belong to another user", async () => {
+    const victim = await seedWithSpecialist();
+    const attackerChat = nextChatId++;
+    await seedUser({ telegramChatId: attackerChat });
+
+    for (const data of [`ay:${victim.specialist.id}`, `ar:${victim.specialist.id}`, `at:${victim.specialist.id}`]) {
+      await post(buttonUpdate(attackerChat, data));
+    }
+
+    expect(await q.getAgent(victim.user.id, victim.specialist.id)).toBeDefined();
+    expect(sentTexts(attackerChat).every((t) => t === msg.STALE_BUTTON)).toBe(true);
+    expect(calls("answerCallbackQuery")).not.toHaveLength(0);
+  });
+
+  it("only answers button taps from unlinked chats", async () => {
+    const chatId = nextChatId++;
+
+    await post(buttonUpdate(chatId, "al"));
+
+    expect(sentTexts(chatId)).toEqual([]);
+    expect(calls("answerCallbackQuery")).toHaveLength(1);
+  });
+});
+
+// ─── Scheduled tasks ────────────────────────────────────────────────────────
+
+describe("scheduled tasks", () => {
+  it("/briefing asks for a time and days, then schedules it on the main agent", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+
+    await post(textUpdate(chatId, "/briefing"));
+    await post(textUpdate(chatId, "7:30am"));
+    expect(lastSent(chatId)).toBe(msg.ASK_TASK_DAYS);
+    await post(buttonUpdate(chatId, buttonData(chatId, "Weekdays")!));
+
+    const [job] = await q.listJobs(user.id);
+    expect(job).toMatchObject({
+      cronExpression: "30 7 * * 1-5",
+      agentId: (await q.ensurePrimaryAgent(user.id)).id,
+      enabled: true,
+    });
+    expect(job.prompt).toContain("morning briefing");
+    expect(lastSent(chatId)).toContain("✅ Scheduled your morning briefing weekdays at 07:30 (America/New_York)");
+  });
+
+  it("/newtask asks which agent when the user has several", async () => {
+    const { chatId, user, specialist } = await seedWithSpecialist();
+
+    await post(textUpdate(chatId, "/newtask Find new sleep research"));
+    await post(textUpdate(chatId, "tomorrow"));
+    expect(lastSent(chatId)).toBe(msg.TIME_INVALID);
+    await post(textUpdate(chatId, "18:00"));
+    await post(buttonUpdate(chatId, buttonData(chatId, "Every day")!));
+    expect(lastSent(chatId)).toBe(msg.ASK_TASK_AGENT);
+    await post(buttonUpdate(chatId, buttonData(chatId, "Researcher")!));
+
+    const [job] = await q.listJobs(user.id);
+    expect(job).toMatchObject({ prompt: "Find new sleep research", cronExpression: "0 18 * * *", agentId: specialist.id });
+  });
+
+  it("/tasks buttons pause, resume, run now and delete", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await post(textUpdate(chatId, "/newtask Check my inbox"));
+    await post(textUpdate(chatId, "9"));
+    await post(buttonUpdate(chatId, buttonData(chatId, "Every day")!));
+    const [job] = await q.listJobs(user.id);
+
+    await post(textUpdate(chatId, "/tasks"));
+    expect(lastSent(chatId)).toContain("<b>Check my inbox</b>");
+    expect(buttonData(chatId, /Check my inbox/)).toBe(`t:${job.id}`);
+
+    await post(buttonUpdate(chatId, `tp:${job.id}`));
+    expect((await q.getJob(user.id, job.id))?.enabled).toBe(false);
+    expect(editedTexts(chatId).at(-1)).toContain("paused");
+
+    await post(buttonUpdate(chatId, `tn:${job.id}`));
+    expect(calls("answerCallbackQuery").at(-1)).toMatchObject({ text: msg.TASK_PAUSED_CANT_RUN });
+
+    await post(buttonUpdate(chatId, `tr:${job.id}`));
+    expect((await q.getJob(user.id, job.id))?.enabled).toBe(true);
+
+    await post(buttonUpdate(chatId, `tn:${job.id}`));
+    expect(calls("answerCallbackQuery").at(-1)).toMatchObject({ text: msg.TASK_QUEUED });
+    expect((await q.getJob(user.id, job.id))!.nextRunAt!.getTime()).toBeLessThanOrEqual(Date.now());
+
+    await post(buttonUpdate(chatId, `ty:${job.id}`));
+    expect(await q.listJobs(user.id)).toEqual([]);
+  });
+
+  it("ignores task button ids that belong to another user", async () => {
+    const ownerChat = nextChatId++;
+    const owner = await seedUser({ telegramChatId: ownerChat });
+    await post(textUpdate(ownerChat, "/newtask Secret task"));
+    await post(textUpdate(ownerChat, "9"));
+    await post(buttonUpdate(ownerChat, buttonData(ownerChat, "Every day")!));
+    const [job] = await q.listJobs(owner.id);
+
+    const attackerChat = nextChatId++;
+    await seedUser({ telegramChatId: attackerChat });
+    await post(buttonUpdate(attackerChat, `ty:${job.id}`));
+    await post(buttonUpdate(attackerChat, `t:${job.id}`));
+
+    expect(await q.getJob(owner.id, job.id)).toBeDefined();
+    expect(editedTexts(attackerChat)).toEqual([]);
+  });
+
+  it("a days button from an abandoned flow is stale", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await post(textUpdate(chatId, "/briefing 7"));
+    const days = buttonData(chatId, "Every day")!;
+    await post(textUpdate(chatId, "/cancel"));
+
+    await post(buttonUpdate(chatId, days));
+
+    expect(await q.listJobs(user.id)).toEqual([]);
+    expect(lastSent(chatId)).toBe(msg.STALE_BUTTON);
+  });
+});
+
+// ─── Account ────────────────────────────────────────────────────────────────
+
+describe("account commands", () => {
+  it("/timezone shows the zone, and changes it case-insensitively", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+
+    await post(textUpdate(chatId, "/timezone"));
+    expect(lastSent(chatId)).toContain("<b>America/New_York</b>");
+    await post(textUpdate(chatId, "/timezone europe/london"));
+    expect((await getUser(user.id))?.timezone).toBe("Europe/London");
+    await post(textUpdate(chatId, "/timezone Mars/Base"));
+    expect(lastSent(chatId)).toContain("I don't know the timezone");
+    expect((await getUser(user.id))?.timezone).toBe("Europe/London");
+  });
+
+  it("/usage reports this month's share of the allowance", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await q.incrementUsage(user.id, q.currentMonth(), { inputTokens: 40_000, outputTokens: 10_000, messageCount: 12 });
+
+    await post(textUpdate(chatId, "/usage"));
+
+    expect(lastSent(chatId)).toContain("25% of your allowance: 50,000 of 200,000 tokens, across 12 messages");
+  });
+
+  it("/connections shows status and points to the web hub", async () => {
+    const chatId = nextChatId++;
+    await seedUser({ telegramChatId: chatId });
+    listConnectionsMock.mockResolvedValueOnce([
+      {
+        slug: "GMAIL",
+        name: "Gmail",
+        description: "",
+        access: [{ id: "draft", label: "Read and draft", description: "" }],
+        currentAccess: "draft",
+        status: "ACTIVE",
+      },
+      { slug: "GOOGLECALENDAR", name: "Google Calendar", description: "", access: [], currentAccess: "read" },
+    ]);
+
+    await post(textUpdate(chatId, "/connections"));
+
+    const text = lastSent(chatId);
+    expect(text).toContain("<b>Gmail</b>: ✅ connected · read and draft");
+    expect(text).toContain("<b>Google Calendar</b>: ⚪️ not connected");
+    expect(text).toContain('href="http://localhost:3000/settings/integrations"');
+  });
+
+  it("registers the command menu once", async () => {
+    const chatId = nextChatId++;
+    await seedUser({ telegramChatId: chatId });
+    h.redis.store.delete("tg:commands:v1");
+
+    await post(textUpdate(chatId, "/help"));
+    await post(textUpdate(chatId, "/help"));
+
+    expect(calls("setMyCommands")).toHaveLength(1);
+    expect(lastSent(chatId)).toBe(msg.HELP);
   });
 });

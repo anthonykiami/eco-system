@@ -16,6 +16,8 @@ export type RunContext = TraceContext & {
   integrationNotes: string[];
   /** Accumulates tokens across every model call in the run; recorded to the usage table at the end. */
   usage: TokenUsage;
+  /** From RunAgentInput; fired by each delegation tool before the specialist runs. */
+  onDelegate?: (agent: { id: string; name: string }) => void;
 };
 
 export function addUsage(total: TokenUsage, usage: LanguageModelUsage): void {

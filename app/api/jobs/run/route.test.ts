@@ -88,6 +88,22 @@ describe("POST /api/jobs/run: running", () => {
     expect(fake.redis.store.has(jobLockKey(job.id))).toBe(false); // lock released
   });
 
+  it("labels a specialist's result with its name", async () => {
+    const { user } = await seedUser("specialist@example.com", { telegramChatId: "tg-spec" });
+    const coach = await q.createAgent(user.id, { name: "Coach", soul: "You coach." });
+    const job = await q.createJob(user.id, {
+      agentId: coach.id,
+      cronExpression: "0 9 * * *",
+      prompt: "weekly check-in",
+      nextRunAt: new Date(Date.now() + 86_400_000),
+    });
+    const scheduledFor = new Date(Date.now() - 60_000).toISOString();
+
+    await POST(qstashRequest(PATH, { jobId: job.id, userId: user.id, scheduledFor }));
+
+    expect(sentTexts()).toEqual([{ chat_id: "tg-spec", text: "<b>Coach</b>\nweekly check-in" }]);
+  });
+
   it("does not send anything to Telegram when the user hasn't linked it", async () => {
     const { message } = await seedJob("nolink@example.com");
     const res = await POST(qstashRequest(PATH, message));

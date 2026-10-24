@@ -79,10 +79,11 @@ runAgent(input: {
   agentId?: string;  // omitted → the user's primary agent
   message: string;
   channel: 'web' | 'telegram' | 'scheduled';
+  onDelegate?: (agent: { id: string; name: string }) => void; // fired when the primary agent hands work to a specialist
 }): Promise<{ text: string; chatId: string }>
 ```
 
-Import it with `import { runAgent } from "@/lib/agents"`. Right now it is a stub: it saves the user message and an echo reply, then returns `{ text: message, chatId }`.
+Import it with `import { runAgent } from "@/lib/agents"`.
 
 ### Errors (`lib/agents/errors.ts`)
 
