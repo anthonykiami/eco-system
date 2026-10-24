@@ -1,0 +1,92 @@
+import Link from "next/link";
+import { listToolkitConnections } from "@/lib/agents/composio";
+import { requireActiveUser } from "@/lib/auth/session";
+import { connectToolkit, removeToolkit } from "./actions";
+
+const ERRORS: Record<string, string> = {
+  start: "Couldn't start that connection. Please try again.",
+  disconnect: "Couldn't disconnect that account. Please try again.",
+  unknown: "Unknown integration.",
+};
+
+export default async function IntegrationsPage({
+  searchParams,
+}: PageProps<"/settings/integrations">) {
+  const session = await requireActiveUser();
+  const [toolkits, params] = await Promise.all([
+    listToolkitConnections(session.user.id),
+    searchParams,
+  ]);
+
+  const error = typeof params.error === "string" ? ERRORS[params.error] : undefined;
+  // Composio appends this when it sends the user back from the provider.
+  const justConnected = params.status === "success";
+  const justFailed = params.status === "failed";
+
+  return (
+    <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
+      <div>
+        <h1 className="text-2xl font-semibold">Integrations</h1>
+        <p className="mt-1 text-neutral-500">
+          Connect your accounts so your assistant can act on them. It only ever sees the
+          accounts you connect here.
+        </p>
+      </div>
+
+      {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
+      {justConnected && <p className="text-sm text-green-600">Connected.</p>}
+      {justFailed && (
+        <p role="alert" className="text-sm text-red-500">
+          That connection wasn&apos;t completed.
+        </p>
+      )}
+
+      <ul className="flex flex-col gap-3">
+        {toolkits.map((toolkit) => {
+          const isActive = toolkit.status === "ACTIVE";
+          return (
+            <li
+              key={toolkit.slug}
+              className="flex items-center justify-between gap-4 rounded-xl border border-neutral-200 p-4 dark:border-neutral-800"
+            >
+              <div>
+                <p className="font-medium">{toolkit.name}</p>
+                <p className="text-sm text-neutral-500">{toolkit.description}</p>
+                {toolkit.status && !isActive && (
+                  <p className="mt-1 text-xs text-neutral-500">Status: {toolkit.status}</p>
+                )}
+              </div>
+
+              {isActive ? (
+                <form action={removeToolkit}>
+                  <input
+                    type="hidden"
+                    name="connectedAccountId"
+                    value={toolkit.connectedAccountId}
+                  />
+                  <button type="submit" className="text-sm text-neutral-500 underline">
+                    Disconnect
+                  </button>
+                </form>
+              ) : (
+                <form action={connectToolkit}>
+                  <input type="hidden" name="slug" value={toolkit.slug} />
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-foreground px-4 py-2 text-sm text-background"
+                  >
+                    {toolkit.status ? "Finish connecting" : "Connect"}
+                  </button>
+                </form>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      <Link href="/settings" className="text-sm underline">
+        Back to settings
+      </Link>
+    </main>
+  );
+}

@@ -17,6 +17,9 @@ export default async function SettingsPage() {
         <Link href="/settings/telegram" className="underline">
           Telegram
         </Link>
+        <Link href="/settings/integrations" className="underline">
+          Integrations
+        </Link>
       </nav>
       <p className="text-neutral-500">More settings coming soon.</p>
       <Link href="/" className="text-sm underline">
