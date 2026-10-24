@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ToolSet } from "ai";
+import { asSchema, jsonSchema, type ToolSet } from "ai";
 import {
   disconnectToolkit,
   isAccessLevel,
@@ -9,6 +9,8 @@ import {
   resolveAccess,
   startToolkitConnection,
   TOOLKITS,
+  toObjectSchema,
+  withObjectInputSchemas,
 } from "./composio";
 
 const mocks = vi.hoisted(() => ({
@@ -54,7 +56,7 @@ const EVERY_GMAIL_TOOL = [
   "COMPOSIO_MULTI_EXECUTE_TOOL",
 ];
 const toolsNamed = (names: string[]): ToolSet =>
-  Object.fromEntries(names.map((n) => [n, { description: n, inputSchema: {} } as unknown as ToolSet[string]]));
+  Object.fromEntries(names.map((n) => [n, { description: n, inputSchema: jsonSchema({ type: "object", properties: {} }) } as unknown as ToolSet[string]]));
 const savedGmail = (access: string) => mocks.listAccess.mockResolvedValue([{ toolkit: "GMAIL", access }]);
 
 describe("toolkit catalog", () => {
@@ -194,5 +196,38 @@ describe("disconnectToolkit", () => {
   it("refuses an id that isn't in the user's own connections", async () => {
     await expect(disconnectToolkit("user-1", "ca_someone_else")).rejects.toThrow(/does not belong/);
     expect(mocks.del).not.toHaveBeenCalled();
+  });
+});
+
+describe("tool input schemas", () => {
+  const draft = { type: "object" as const, properties: { to: { type: "string" as const } }, required: ["to"] };
+
+  it("unwraps Composio's allOf wrapper to the object schema Claude requires", () => {
+    expect(toObjectSchema({ allOf: [{}, draft], description: "Draft an email" })).toEqual({
+      ...draft,
+      description: "Draft an email",
+    });
+    expect(toObjectSchema(draft)).toBe(draft);
+  });
+
+  it("gives up on shapes it can't turn into an object", () => {
+    expect(toObjectSchema({ anyOf: [draft, { type: "string" }] })).toBeUndefined();
+    expect(toObjectSchema({ allOf: [draft, draft] })).toBeUndefined();
+  });
+
+  it("rewrites wrapped schemas, keeps validation and drops tools it can't fix", async () => {
+    const validate = vi.fn(() => ({ success: true as const, value: { to: "a@b.c" } }));
+    const tools = {
+      WRAPPED: { description: "w", inputSchema: jsonSchema({ allOf: [{}, draft] }, { validate }) },
+      BROKEN: { description: "b", inputSchema: jsonSchema({ type: "string" }) },
+    } as unknown as ToolSet;
+
+    const fixed = await withObjectInputSchemas(tools);
+
+    expect(Object.keys(fixed)).toEqual(["WRAPPED"]);
+    const schema = asSchema(fixed.WRAPPED.inputSchema);
+    expect(await schema.jsonSchema).toEqual(draft);
+    await schema.validate?.({ to: "a@b.c" });
+    expect(validate).toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
-import type { ToolSet } from "ai";
+import { asSchema, jsonSchema, type JSONSchema7, type ToolSet } from "ai";
 import { listIntegrationAccess } from "@/lib/db/queries";
 import { env } from "@/lib/env";
 
@@ -262,6 +262,40 @@ export function filterToolsByAccess(tools: ToolSet, levels: Map<ToolkitSlug, Acc
 }
 
 /**
+ * Claude rejects the whole request if any tool's input schema isn't a top-level object. Some
+ * Composio schemas convert to `allOf: [{}, { type: "object", ... }]`; unwrap those to the object.
+ * Returns undefined for a shape it can't fix.
+ */
+export function toObjectSchema(schema: JSONSchema7): JSONSchema7 | undefined {
+  if (schema.type === "object") return schema;
+  const { allOf, ...rest } = schema;
+  const parts = (allOf ?? []).filter(
+    (part): part is JSONSchema7 => typeof part === "object" && Object.keys(part).length > 0,
+  );
+  if (parts.length === 1 && parts[0].type === "object") return { ...rest, ...parts[0] };
+  return undefined;
+}
+
+/** Rewrites each tool's input schema with toObjectSchema, keeping its validation; drops tools it can't fix. */
+export async function withObjectInputSchemas(tools: ToolSet): Promise<ToolSet> {
+  const entries = await Promise.all(
+    Object.entries(tools).map(async ([name, tool]) => {
+      try {
+        const schema = asSchema(tool.inputSchema);
+        const fixed = toObjectSchema(await schema.jsonSchema);
+        if (fixed) return [[name, { ...tool, inputSchema: jsonSchema(fixed, { validate: schema.validate }) }]];
+      } catch (err) {
+        console.warn(`[agents] composio tool ${name} has an unreadable schema`, err);
+        return [];
+      }
+      console.warn(`[agents] dropped composio tool ${name}: its input schema isn't an object`);
+      return [];
+    }),
+  );
+  return Object.fromEntries(entries.flat()) as ToolSet;
+}
+
+/**
  * Composio tools for the catalog toolkits this user has actively connected, limited to the
  * access level they chose for each, using our userId as the Composio entity id.
  * Returns no tools if the user has no connections or Composio is unavailable.
@@ -295,7 +329,7 @@ export async function loadComposioTools(userId: string): Promise<ComposioTools> 
       sandbox: { enable: false },
     });
     const all = (await session.tools()) as ToolSet;
-    const tools = filterToolsByAccess(all, levels);
+    const tools = await withObjectInputSchemas(filterToolsByAccess(all, levels));
 
     const dropped = Object.keys(all).length - Object.keys(tools).length;
     if (dropped > 0) console.warn(`[agents] withheld ${dropped} composio tools by access level`);
