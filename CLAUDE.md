@@ -80,6 +80,7 @@ runAgent(input: {
   message: string;
   channel: 'web' | 'telegram' | 'scheduled';
   onDelegate?: (agent: { id: string; name: string }) => void; // fired when the primary agent hands work to a specialist
+  onTaskScheduled?: (task: { id: string }) => void;          // fired when the agent creates a task; it starts switched off until the user turns it on
 }): Promise<{ text: string; chatId: string }>
 ```
 
