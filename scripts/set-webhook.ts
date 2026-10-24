@@ -1,5 +1,6 @@
 /**
- * Registers the shared bot's webhook and command menu.
+ * Registers the shared bot's webhook. The command menu is registered by the app itself
+ * (lib/telegram/bot-commands.ts) on the first update it handles.
  *
  *   node --env-file=.env.local scripts/set-webhook.ts
  *
@@ -35,17 +36,10 @@ async function main() {
   await call(token, "setWebhook", {
     url,
     secret_token: secret,
-    allowed_updates: ["message"],
+    // callback_query carries inline-button taps (/agents, /tasks…).
+    allowed_updates: ["message", "callback_query"],
   });
   console.log(`Webhook set to ${url}`);
-
-  await call(token, "setMyCommands", {
-    commands: [
-      { command: "new", description: "Start a new conversation" },
-      { command: "link", description: "Link your account: /link CODE" },
-    ],
-  });
-  console.log("Bot commands registered");
 
   console.log(await call(token, "getWebhookInfo", {}));
 }
