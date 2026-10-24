@@ -500,7 +500,9 @@ describe("per-user isolation", () => {
       _tags: containerTags,
     }));
     mocks.listConnectedAccounts.mockImplementation(async ({ userIds }: { userIds: string[] }) => ({
-      items: userIds.flatMap((id) => (toolkitsByUser[id] ? [{ toolkit: { slug: toolkitsByUser[id] } }] : [])),
+      items: userIds.flatMap((id) =>
+        toolkitsByUser[id] ? [{ id: `ca_${id}`, status: "ACTIVE", toolkit: { slug: toolkitsByUser[id] } }] : [],
+      ),
     }));
     // A read tool from each toolkit, so it passes every access level.
     const readTool: Record<string, string> = {
@@ -542,6 +544,9 @@ describe("per-user isolation", () => {
       // Composio: only this user's entity id.
       expect(mocks.listConnectedAccounts.mock.calls.map(([p]) => p.userIds)).toEqual([[self.userId]]);
       expect(mocks.createComposioSession.mock.calls.map(([id]) => id)).toEqual([self.userId]);
+      expect(
+        mocks.createComposioSession.mock.calls.flatMap(([, config]) => Object.values(config.connectedAccounts)),
+      ).toEqual([`ca_${self.userId}`]);
 
       // What the model saw.
       const [call] = agentCalls();

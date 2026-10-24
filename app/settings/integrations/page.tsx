@@ -54,7 +54,7 @@ export default async function IntegrationsPage({
 
       <ul className="flex flex-col gap-3">
         {toolkits.map((toolkit) => {
-          const isActive = toolkit.status === "ACTIVE";
+          const connected = toolkit.accounts.length > 0;
           return (
             <li
               key={toolkit.slug}
@@ -64,23 +64,12 @@ export default async function IntegrationsPage({
                 <div>
                   <p className="font-medium">{toolkit.name}</p>
                   <p className="text-sm text-neutral-500">{toolkit.description}</p>
-                  {toolkit.status && !isActive && (
+                  {toolkit.status && !connected && (
                     <p className="mt-1 text-xs text-neutral-500">Status: {toolkit.status}</p>
                   )}
                 </div>
 
-                {isActive ? (
-                  <form action={removeToolkit}>
-                    <input
-                      type="hidden"
-                      name="connectedAccountId"
-                      value={toolkit.connectedAccountId}
-                    />
-                    <button type="submit" className="text-sm text-neutral-500 underline">
-                      Disconnect
-                    </button>
-                  </form>
-                ) : (
+                {!connected && (
                   <form action={connectToolkit}>
                     <input type="hidden" name="slug" value={toolkit.slug} />
                     <button
@@ -92,6 +81,40 @@ export default async function IntegrationsPage({
                   </form>
                 )}
               </div>
+
+              {connected && (
+                <div className="flex flex-col gap-2">
+                  <ul className="flex flex-col gap-1">
+                    {toolkit.accounts.map((account, i) => (
+                      <li key={account.id} className="flex items-center justify-between gap-4 text-sm">
+                        <span>
+                          {account.email ?? `Account ${i + 1}`}
+                          {i === 0 && toolkit.accounts.length > 1 && (
+                            <span className="text-neutral-500"> · default</span>
+                          )}
+                        </span>
+                        <form action={removeToolkit}>
+                          <input type="hidden" name="connectedAccountId" value={account.id} />
+                          <button type="submit" className="text-neutral-500 underline">
+                            Disconnect
+                          </button>
+                        </form>
+                      </li>
+                    ))}
+                  </ul>
+                  <form action={connectToolkit}>
+                    <input type="hidden" name="slug" value={toolkit.slug} />
+                    <button type="submit" className="text-sm underline">
+                      Connect another account
+                    </button>
+                  </form>
+                  <p className="text-xs text-neutral-500">
+                    Pick the account on Google&apos;s sign-in screen. If Google doesn&apos;t ask, sign
+                    in to that account in this browser first. Your agents can use every account
+                    listed here.
+                  </p>
+                </div>
+              )}
 
               <form action={setToolkitAccess} className="flex flex-col gap-2">
                 <input type="hidden" name="slug" value={toolkit.slug} />

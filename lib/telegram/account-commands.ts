@@ -15,7 +15,8 @@ function connectionState(c: ToolkitConnection): string {
       return "⚪️ not connected";
     case "ACTIVE": {
       const level = c.access.find((a) => a.id === c.currentAccess);
-      return `✅ connected${level ? ` · ${escapeHtml(level.label.toLowerCase())}` : ""}`;
+      const emails = c.accounts.flatMap((a) => (a.email ? [escapeHtml(a.email)] : []));
+      return [`✅ connected${level ? ` · ${escapeHtml(level.label.toLowerCase())}` : ""}`, ...emails].join("\n   ");
     }
     case "INITIATED":
     case "INITIALIZING":
@@ -39,7 +40,7 @@ export async function showConnections(c: BotContext): Promise<void> {
       "",
       ...lines,
       "",
-      `Connect accounts and choose what your agents may do with them in <a href="${msg.connectionsUrl()}">Settings → Integrations</a>.`,
+      `Connect accounts (more than one each, like work and personal Gmail) and choose what your agents may do with them in <a href="${msg.connectionsUrl()}">Settings → Integrations</a>.`,
     ].join("\n"),
   );
 }

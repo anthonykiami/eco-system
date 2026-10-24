@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   authCreate: vi.fn(),
   createSession: vi.fn(),
   listAccess: vi.fn(),
+  redisGet: vi.fn(),
+  redisSet: vi.fn(),
 }));
 
 vi.mock("@composio/core", () => ({
@@ -32,8 +34,16 @@ vi.mock("@composio/core", () => ({
 }));
 vi.mock("@/lib/db/queries", () => ({ listIntegrationAccess: mocks.listAccess }));
 vi.mock("@composio/vercel", () => ({ VercelProvider: class {} }));
+vi.mock("@/lib/upstash", () => ({ redis: { get: mocks.redisGet, set: mocks.redisSet } }));
 
-const ACCOUNT = { id: "ca_1", status: "ACTIVE", toolkit: { slug: "gmail" } };
+const ACCOUNT = {
+  id: "ca_1",
+  status: "ACTIVE",
+  createdAt: "2026-01-01T00:00:00Z",
+  toolkit: { slug: "gmail" },
+  data: { displayName: "me@gmail.com" },
+};
+const WORK_ACCOUNT = { ...ACCOUNT, id: "ca_2", createdAt: "2026-02-01T00:00:00Z", data: { displayName: "me@work.com" } };
 
 beforeEach(() => {
   mocks.list.mockReset().mockResolvedValue({ items: [ACCOUNT] });
@@ -42,6 +52,8 @@ beforeEach(() => {
   mocks.authList.mockReset().mockResolvedValue({ items: [{ id: "ac_existing" }] });
   mocks.authCreate.mockReset().mockResolvedValue({ id: "ac_new" });
   mocks.listAccess.mockReset().mockResolvedValue([]);
+  mocks.redisGet.mockReset().mockResolvedValue(null);
+  mocks.redisSet.mockReset().mockResolvedValue("OK");
   mocks.createSession.mockReset().mockResolvedValue({ tools: async () => toolsNamed(EVERY_GMAIL_TOOL) });
 });
 
@@ -119,6 +131,40 @@ describe("loadComposioTools", () => {
     expect(mocks.createSession.mock.calls[0][1].tools).toEqual({});
   });
 
+  it("with several accounts, each tool takes an account and runs through that account's session", async () => {
+    mocks.list.mockResolvedValue({ items: [ACCOUNT, WORK_ACCOUNT] });
+    const runs: string[] = [];
+    const sessionTools = (account: string): ToolSet => ({
+      GMAIL_FETCH_EMAILS: {
+        description: "fetch",
+        inputSchema: jsonSchema({ type: "object", properties: { query: { type: "string" } } }),
+        execute: async (input: unknown) => {
+          runs.push(`${account}:${JSON.stringify(input)}`);
+          return "ok";
+        },
+      } as unknown as ToolSet[string],
+    });
+    mocks.createSession.mockImplementation(async (_userId, config) => ({
+      tools: async () => sessionTools(config.connectedAccounts.gmail),
+    }));
+
+    const { tools, notes } = await loadComposioTools("user-1");
+
+    expect(mocks.createSession.mock.calls.map((c) => c[1].connectedAccounts)).toEqual([
+      { gmail: "ca_1" },
+      { gmail: "ca_2" },
+    ]);
+    const schema = asSchema(tools.GMAIL_FETCH_EMAILS.inputSchema);
+    expect((await schema.jsonSchema).properties?.account).toMatchObject({ enum: ["me@gmail.com", "me@work.com"] });
+    expect((await schema.validate!({ query: "x", account: "someone@else.com" })).success).toBe(false);
+
+    const opts = { toolCallId: "t", messages: [], context: {} };
+    await tools.GMAIL_FETCH_EMAILS.execute!({ query: "a", account: "me@work.com" }, opts);
+    await tools.GMAIL_FETCH_EMAILS.execute!({ query: "b" }, opts);
+    expect(runs).toEqual(['ca_2:{"query":"a"}', 'ca_1:{"query":"b"}']);
+    expect(notes.join("\n")).toMatch(/2 Gmail accounts connected: me@gmail.com, me@work.com/);
+  });
+
   it("ignores toolkits outside the catalog", async () => {
     mocks.list.mockResolvedValue({ items: [{ id: "ca_9", status: "ACTIVE", toolkit: { slug: "github" } }] });
     expect(await loadComposioTools("user-1")).toEqual({ tools: {}, notes: [] });
@@ -139,7 +185,7 @@ describe("listToolkitConnections", () => {
     expect(list).toHaveLength(TOOLKITS.length);
     expect(list.find((t) => t.slug === "GMAIL")).toMatchObject({
       status: "ACTIVE",
-      connectedAccountId: "ca_1",
+      accounts: [{ id: "ca_1", email: "me@gmail.com" }],
       currentAccess: "draft",
     });
     expect(list.find((t) => t.slug === "GOOGLECALENDAR")?.status).toBeUndefined();
@@ -153,8 +199,35 @@ describe("listToolkitConnections", () => {
     const list = await listToolkitConnections("user-1");
     expect(list.find((t) => t.slug === "GMAIL")).toMatchObject({
       status: "ACTIVE",
-      connectedAccountId: "ca_1",
+      accounts: [{ id: "ca_1", email: "me@gmail.com" }],
     });
+  });
+
+  it("lists every working account oldest first, counting the same address once", async () => {
+    mocks.list.mockResolvedValue({ items: [WORK_ACCOUNT, ACCOUNT, { ...ACCOUNT, id: "ca_3", createdAt: "2026-03-01" }] });
+    const gmail = (await listToolkitConnections("user-1")).find((t) => t.slug === "GMAIL");
+    expect(gmail?.accounts).toEqual([
+      { id: "ca_1", email: "me@gmail.com" },
+      { id: "ca_2", email: "me@work.com" },
+    ]);
+  });
+
+  it("asks the provider for the address when Composio doesn't store it, and caches it", async () => {
+    const calendar = { id: "ca_c", status: "ACTIVE", toolkit: { slug: "googlecalendar" }, data: {} };
+    mocks.list.mockResolvedValue({ items: [calendar] });
+    const execute = vi.fn().mockResolvedValue({ data: { email: "me@gmail.com" } });
+    mocks.createSession.mockResolvedValue({ tools: async () => ({ GOOGLECALENDAR_GET_CURRENT_USER: { execute } }) });
+
+    const list = await listToolkitConnections("user-1");
+
+    expect(list.find((t) => t.slug === "GOOGLECALENDAR")?.accounts).toEqual([{ id: "ca_c", email: "me@gmail.com" }]);
+    expect(mocks.createSession.mock.calls[0][1].connectedAccounts).toEqual({ googlecalendar: "ca_c" });
+    expect(mocks.redisSet).toHaveBeenCalledWith("composio:account-email:user-1:ca_c", "me@gmail.com", expect.anything());
+
+    mocks.redisGet.mockResolvedValue("me@gmail.com");
+    execute.mockClear();
+    await listToolkitConnections("user-1");
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("degrades to an unconnected list when Composio is down", async () => {
@@ -171,6 +244,7 @@ describe("startToolkitConnection", () => {
     expect(url).toBe("https://oauth.example");
     expect(mocks.link).toHaveBeenCalledWith("user-1", "ac_existing", {
       callbackUrl: "https://app.test/cb",
+      allowMultiple: true,
     });
   });
 

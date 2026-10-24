@@ -26,11 +26,11 @@ Use this for anything relative: "today", "tomorrow", "this week", scheduling, an
 </situation>`;
 }
 
-/** What the user's integration settings don't allow, so the agent explains rather than retries. */
+/** Which accounts are connected and what the user's settings don't allow, so the agent explains rather than retries. */
 export function buildIntegrationLimits(notes: string[]): string | undefined {
   if (notes.length === 0) return undefined;
   return `<integration_limits>
-The user chose these limits for their connected accounts. Respect them, and never try to work around them.
+About the user's connected accounts. Respect any limits the user chose, and never try to work around them.
 ${notes.map((n) => `- ${n}`).join("\n")}
 </integration_limits>`;
 }

@@ -901,15 +901,26 @@ describe("account commands", () => {
         description: "",
         access: [{ id: "draft", label: "Read and draft", description: "" }],
         currentAccess: "draft",
+        accounts: [
+          { id: "ca_1", email: "me@gmail.com" },
+          { id: "ca_2", email: "me@work.com" },
+        ],
         status: "ACTIVE",
       },
-      { slug: "GOOGLECALENDAR", name: "Google Calendar", description: "", access: [], currentAccess: "read" },
+      {
+        slug: "GOOGLECALENDAR",
+        name: "Google Calendar",
+        description: "",
+        access: [],
+        currentAccess: "read",
+        accounts: [],
+      },
     ]);
 
     await post(textUpdate(chatId, "/connections"));
 
     const text = lastSent(chatId);
-    expect(text).toContain("<b>Gmail</b>: ✅ connected · read and draft");
+    expect(text).toContain("<b>Gmail</b>: ✅ connected · read and draft\n   me@gmail.com\n   me@work.com");
     expect(text).toContain("<b>Google Calendar</b>: ⚪️ not connected");
     expect(text).toContain('href="http://localhost:3000/settings/integrations"');
   });
