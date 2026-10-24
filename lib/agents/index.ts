@@ -19,6 +19,7 @@ import { enforceLimits, resolvePlan } from "./limits";
 import { buildMemoryTools, rememberFacts } from "./memory";
 import { webTools } from "./models";
 import { runAgentTurn } from "./primary";
+import { buildScheduleTools } from "./schedule-tools";
 import { buildDelegationTools } from "./specialized";
 import type { AgentChannel, RunAgent } from "./types";
 
@@ -54,12 +55,8 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
       const history = await listMessages(userId, chat.id, { limit: HISTORY_LIMIT });
       await addMessage(userId, { chatId: chat.id, role: "user", content: message });
 
-      const [composio, specialists] = await Promise.all([
-        loadComposioTools(userId),
-        agent.role === "primary"
-          ? listAgents(userId).then((agents) => agents.filter((a) => a.role === "specialized"))
-          : [],
-      ]);
+      const [composio, agents] = await Promise.all([loadComposioTools(userId), listAgents(userId)]);
+      const specialists = agent.role === "primary" ? agents.filter((a) => a.role === "specialized") : [];
       ctx.integrationNotes = composio.notes;
       // Specialists get the user's integrations and the plan's web tools, but not memory or delegation.
       const workTools = { ...composio.tools, ...webTools(ctx.plan, ctx.timezone) };
@@ -67,6 +64,8 @@ export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, cha
         ...workTools,
         ...buildMemoryTools(userId),
         ...buildDelegationTools(ctx, specialists, workTools),
+        // A scheduled run can't schedule more runs.
+        ...(channel === "scheduled" ? {} : buildScheduleTools(ctx, agent, agents)),
       };
 
       const text = (await runAgentTurn({ ctx, agent, history, message, tools })).trim() || EMPTY_REPLY;

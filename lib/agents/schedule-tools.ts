@@ -1,0 +1,128 @@
+import { tool, type ToolSet } from "ai";
+import { z } from "zod";
+import { getJob } from "@/lib/db/queries";
+import type { Agent, ScheduledJob } from "@/lib/db/schema";
+import {
+  createUserJob,
+  deleteUserJob,
+  listUserJobs,
+  pauseUserJob,
+  resumeUserJob,
+} from "@/lib/heartbeat";
+import { briefingPrompt, dailyCron, describeCron, WEEKDAYS, weeklyCron } from "@/lib/heartbeat/briefing";
+import type { RunContext } from "./context";
+
+/** Same cap as the web form and the Telegram flow. */
+const MAX_TASK_LENGTH = 2000;
+
+function formatWhen(date: Date | null, timezone: string): string | null {
+  if (!date) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+/**
+ * Lets the agent the user is talking to create and manage scheduled tasks in conversation
+ * ("every weekday at 7, check my inbox"). `agents` must already be scoped to ctx.userId.
+ * Not given to scheduled runs, so a task can't schedule more tasks.
+ */
+export function buildScheduleTools(ctx: RunContext, self: Agent, agents: Agent[]): ToolSet {
+  const userId = ctx.userId;
+  const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? "unknown";
+  const describe = (job: ScheduledJob) => ({
+    id: job.id,
+    task: job.prompt.length > 300 ? `${job.prompt.slice(0, 300)}…` : job.prompt,
+    schedule: describeCron(job.cronExpression),
+    agent: agentName(job.agentId),
+    status: job.enabled ? "active" : "paused",
+    nextRun: job.enabled ? formatWhen(job.nextRunAt, ctx.timezone) : null,
+  });
+
+  return {
+    list_scheduled_tasks: tool({
+      description:
+        "List the user's scheduled tasks: recurring jobs that run on their own and send the result to the user's Telegram.",
+      inputSchema: z.object({}),
+      execute: async () => ({ tasks: (await listUserJobs(userId)).map(describe), timezone: ctx.timezone }),
+    }),
+
+    schedule_task: tool({
+      description: [
+        "Schedule a recurring task. At each run an agent carries out `task` on its own and the result is sent to the user's Telegram.",
+        `Times are in the user's timezone (${ctx.timezone}).`,
+        "Confirm the time and days with the user if they're unclear. For one-off reminders, explain that only recurring schedules are supported.",
+      ].join(" "),
+      inputSchema: z.object({
+        task: z
+          .string()
+          .max(MAX_TASK_LENGTH)
+          .describe(
+            "Complete, self-contained instructions for the future run, which won't see this conversation. E.g. 'Summarize my unread email from the last 24 hours that needs a reply.'",
+          ),
+        time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).describe("24-hour HH:MM, e.g. 07:30"),
+        days: z
+          .union([z.enum(["every_day", "weekdays"]), z.array(z.enum(WEEKDAYS)).min(1)])
+          .describe('"every_day", "weekdays", or specific days like ["mon", "thu"]'),
+        morning_briefing: z
+          .boolean()
+          .optional()
+          .describe(
+            "True for a morning briefing (calendar, email, reminders, weather). `task` is then only the user's extra requests, or empty.",
+          ),
+        agent: z
+          .string()
+          .optional()
+          .describe(`Name of the agent that should do it. Defaults to you (${self.name}).`),
+      }),
+      execute: async ({ task, time, days, morning_briefing, agent }) => {
+        const owner = agent ? agents.find((a) => a.name.toLowerCase() === agent.trim().toLowerCase()) : self;
+        if (!owner) return { error: `No agent named "${agent}". Agents: ${agents.map((a) => a.name).join(", ")}.` };
+        const cronExpression =
+          days === "every_day"
+            ? dailyCron(time, "daily")
+            : days === "weekdays"
+              ? dailyCron(time, "weekdays")
+              : weeklyCron(time, days);
+        if (!cronExpression) return { error: "Invalid time or days." };
+        if (!morning_briefing && !task.trim()) return { error: "Say what the task should do." };
+
+        const prompt = morning_briefing ? briefingPrompt(task) : task;
+        const job = await createUserJob(userId, { agentId: owner.id, cronExpression, prompt });
+        return { scheduled: describe(job) };
+      },
+    }),
+
+    pause_scheduled_task: tool({
+      description: "Pause a scheduled task by id (from list_scheduled_tasks). It can be resumed later.",
+      inputSchema: z.object({ id: z.string() }),
+      // Every helper is scoped to userId, so another user's id reads as not found.
+      execute: async ({ id }) => {
+        const job = await pauseUserJob(userId, id);
+        return job ? { paused: describe(job) } : { error: "No such task." };
+      },
+    }),
+
+    resume_scheduled_task: tool({
+      description: "Resume a paused scheduled task by id. It continues from its next scheduled time.",
+      inputSchema: z.object({ id: z.string() }),
+      execute: async ({ id }) => {
+        const job = await resumeUserJob(userId, id);
+        return job ? { resumed: describe(job) } : { error: "No such task." };
+      },
+    }),
+
+    delete_scheduled_task: tool({
+      description:
+        "Permanently delete a scheduled task by id. Confirm with the user first unless they clearly asked to delete it.",
+      inputSchema: z.object({ id: z.string() }),
+      execute: async ({ id }) => {
+        const job = await getJob(userId, id);
+        if (!job || !(await deleteUserJob(userId, id))) return { error: "No such task." };
+        return { deleted: describe(job) };
+      },
+    }),
+  };
+}

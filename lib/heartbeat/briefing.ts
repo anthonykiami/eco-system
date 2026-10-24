@@ -24,12 +24,29 @@ export function dailyCron(time: string, days: DayPreset): string | undefined {
   return `${Number(match[2])} ${Number(match[1])} * * ${DAY_PRESETS[days].cronDays}`;
 }
 
-/** Human-readable form of crons made by dailyCron; anything else is shown as-is. */
+export const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+const WEEKDAY_NAMES = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
+
+/** "09:00" + ["mon", "thu"] → "0 9 * * 1,4". Returns undefined for a malformed time or no days. */
+export function weeklyCron(time: string, days: readonly Weekday[]): string | undefined {
+  const daily = dailyCron(time, "daily");
+  const numbers = [...new Set(days.map((d) => WEEKDAYS.indexOf(d)))].filter((n) => n >= 0).sort();
+  if (!daily || numbers.length === 0) return undefined;
+  if (numbers.length === 7) return daily;
+  return daily.replace(/\*$/, numbers.join(","));
+}
+
+/** Human-readable form of crons made by dailyCron and weeklyCron; anything else is shown as-is. */
 export function describeCron(cron: string): string {
-  const match = /^(\d{1,2}) (\d{1,2}) \* \* (\*|1-5)$/.exec(cron);
+  const match = /^(\d{1,2}) (\d{1,2}) \* \* (\*|1-5|[0-6](?:,[0-6])*)$/.exec(cron);
   if (!match) return cron;
   const time = `${match[2].padStart(2, "0")}:${match[1].padStart(2, "0")}`;
-  return `${match[3] === "*" ? "Every day" : "Weekdays"} at ${time}`;
+  if (match[3] === "*") return `Every day at ${time}`;
+  if (match[3] === "1-5") return `Weekdays at ${time}`;
+  const names = match[3].split(",").map((d) => WEEKDAY_NAMES[Number(d)]);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+  return `${list} at ${time}`;
 }
 
 /** Briefing prompt, with the user's own additions appended. */

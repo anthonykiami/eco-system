@@ -324,6 +324,87 @@ describe("delegation", () => {
   });
 });
 
+describe("scheduled task tools", () => {
+  /** Runs one turn where the model calls `toolName` with `args`, then replies; returns the tool's output. */
+  async function callTool(userId: string, toolName: string, args: object, channel: "web" | "telegram" = "telegram") {
+    let output: unknown;
+    mocks.agentGenerate.mockImplementation(async (opts: GenerateOptions) => {
+      const result = opts.prompt.flatMap((m) => (m.role === "tool" ? m.content : []))[0];
+      if (result?.type === "tool-result") {
+        output = result.output.type === "json" ? result.output.value : result.output;
+        return textReply("ok");
+      }
+      return toolCallReply(toolName, args);
+    });
+    await runAgent({ userId, message: "do it", channel });
+    return output as Record<string, unknown>;
+  }
+
+  it("schedules a task for the agent being talked to, in the user's timezone", async () => {
+    const { userId, primary } = await seedUser("scheduler");
+
+    const out = await callTool(userId, "schedule_task", {
+      task: "Summarize unread email",
+      time: "07:30",
+      days: ["mon", "thu"],
+    });
+
+    const [job] = await q.listJobs(userId);
+    expect(job).toMatchObject({ agentId: primary.id, cronExpression: "30 7 * * 1,4", prompt: "Summarize unread email" });
+    expect(out).toMatchObject({ scheduled: { schedule: "Mondays and Thursdays at 07:30", status: "active" } });
+  });
+
+  it("can hand the task to a named agent, and builds briefings from the standard prompt", async () => {
+    const { userId } = await seedUser("briefed");
+    const coach = await q.createAgent(userId, { name: "Coach", soul: "You coach." });
+
+    await callTool(userId, "schedule_task", { task: "", time: "06:00", days: "weekdays", morning_briefing: true });
+    await callTool(userId, "schedule_task", { task: "Weekly check-in", time: "18:00", days: ["sun"], agent: "coach" });
+    const missing = await callTool(userId, "schedule_task", { task: "x", time: "18:00", days: "every_day", agent: "Chef" });
+
+    const jobs = await q.listJobs(userId);
+    const briefing = jobs.find((j) => j.cronExpression === "0 6 * * 1-5");
+    const checkIn = jobs.find((j) => j.prompt === "Weekly check-in");
+    expect(jobs).toHaveLength(2);
+    expect(briefing?.prompt).toContain("Write my morning briefing");
+    expect(checkIn).toMatchObject({ agentId: coach.id, cronExpression: "0 18 * * 0" });
+    expect(missing.error).toContain('No agent named "Chef"');
+  });
+
+  it("lists, pauses, resumes and deletes only the user's own tasks", async () => {
+    const alice = await seedUser("alice-tasks");
+    const bob = await seedUser("bob-tasks");
+    const job = await q.createJob(alice.userId, { agentId: alice.primary.id, cronExpression: "0 9 * * *", prompt: "Alice's task" });
+
+    expect(await callTool(bob.userId, "list_scheduled_tasks", {})).toMatchObject({ tasks: [] });
+    for (const name of ["pause_scheduled_task", "delete_scheduled_task"]) {
+      expect(await callTool(bob.userId, name, { id: job.id })).toEqual({ error: "No such task." });
+    }
+    expect((await q.getJob(alice.userId, job.id))?.enabled).toBe(true);
+
+    expect(await callTool(alice.userId, "list_scheduled_tasks", {})).toMatchObject({
+      tasks: [{ id: job.id, task: "Alice's task", status: "active" }],
+    });
+    await callTool(alice.userId, "pause_scheduled_task", { id: job.id });
+    expect((await q.getJob(alice.userId, job.id))?.enabled).toBe(false);
+    await callTool(alice.userId, "resume_scheduled_task", { id: job.id });
+    expect((await q.getJob(alice.userId, job.id))?.enabled).toBe(true);
+    await callTool(alice.userId, "delete_scheduled_task", { id: job.id });
+    expect(await q.getJob(alice.userId, job.id)).toBeUndefined();
+  });
+
+  it("isn't offered to scheduled runs", async () => {
+    const { userId } = await seedUser("no-recursion");
+
+    await runAgent({ userId, message: "brief me", channel: "scheduled" });
+    await runAgent({ userId, message: "hi", channel: "web" });
+
+    const [scheduled, web] = agentCalls();
+    expect(toolNamesOf(scheduled)).not.toContain("schedule_task");
+    expect(toolNamesOf(web)).toContain("schedule_task");
+  });
+});
+
 describe("per-user isolation", () => {
   const memoriesByTag: Record<string, string> = {};
   const toolkitsByUser: Record<string, string> = {};
