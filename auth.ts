@@ -4,7 +4,7 @@ import type { Adapter, AdapterUser } from "next-auth/adapters";
 import Google from "next-auth/providers/google";
 import { isAdminEmail } from "@/lib/auth/admin";
 import { db } from "@/lib/db";
-import { ensurePrimaryAgent } from "@/lib/db/queries";
+import { ensurePrimaryAgent, updateUser } from "@/lib/db/queries";
 import { accounts, sessions, users, verificationTokens, type User } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 
@@ -44,6 +44,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   events: {
     async createUser({ user }) {
       if (user.id) await ensurePrimaryAgent(user.id);
+    },
+    // Auth.js only saves the Google photo on the first sign-in; keep it current, since people
+    // change their Google photo (or name, which changes Google's letter avatar).
+    async signIn({ user, profile }) {
+      const picture = typeof profile?.picture === "string" ? profile.picture : undefined;
+      if (user.id && picture && picture !== user.image) await updateUser(user.id, { image: picture });
     },
   },
 });
