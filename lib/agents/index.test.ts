@@ -1,4 +1,4 @@
-import { tool } from "ai";
+import { simulateReadableStream, tool } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   listConnectedAccounts: vi.fn(),
   createComposioSession: vi.fn(),
   agentGenerate: vi.fn(),
+  agentStream: vi.fn(),
   utilityGenerate: vi.fn(),
   agentModel: vi.fn(),
   utilityModel: vi.fn(),
@@ -48,7 +49,10 @@ vi.mock("@composio/vercel", () => ({ VercelProvider: class {} }));
 
 vi.mock("./models", async () => {
   const { MockLanguageModelV4 } = await import("ai/test");
-  const agent = new MockLanguageModelV4({ doGenerate: (opts) => mocks.agentGenerate(opts) });
+  const agent = new MockLanguageModelV4({
+    doGenerate: (opts) => mocks.agentGenerate(opts),
+    doStream: (opts) => mocks.agentStream(opts),
+  });
   const utility = new MockLanguageModelV4({ doGenerate: (opts) => mocks.utilityGenerate(opts) });
   mocks.agentModel.mockReturnValue(agent);
   mocks.utilityModel.mockReturnValue(utility);
@@ -227,6 +231,49 @@ describe("a run", () => {
       "what plant is this?\n[Sent a photo]",
       "[Sent a photo]",
     ]);
+  });
+
+  it("streams the reply when asked, starting over after each tool call", async () => {
+    const { userId } = await seedUser("streaming");
+    const finish = (unified: "stop" | "tool-calls") => ({
+      type: "finish" as const,
+      finishReason: { unified, raw: unified === "stop" ? "end_turn" : "tool_use" },
+      usage: usage(20, 7),
+    });
+    const text = (id: string, ...deltas: string[]) => [
+      { type: "text-start" as const, id },
+      ...deltas.map((delta) => ({ type: "text-delta" as const, id, delta })),
+      { type: "text-end" as const, id },
+    ];
+    let step = 0;
+    mocks.agentStream.mockImplementation(async () => ({
+      stream: simulateReadableStream({
+        chunks:
+          step++ === 0
+            ? [
+                { type: "stream-start" as const, warnings: [] },
+                ...text("a", "Let me ", "check"),
+                { type: "tool-call" as const, toolCallId: "c1", toolName: "search_memory", input: '{"query":"x"}' },
+                finish("tool-calls"),
+              ]
+            : [{ type: "stream-start" as const, warnings: [] }, ...text("b", "All ", "done."), finish("stop")],
+      }),
+    }));
+    const partials: string[] = [];
+
+    const { text: reply, chatId } = await runAgent({
+      userId,
+      message: "hi",
+      channel: "telegram",
+      onPartialText: (t) => partials.push(t),
+    });
+
+    expect(partials).toEqual(["Let me ", "Let me check", "All ", "All done."]);
+    expect(reply).toBe("All done.");
+    expect(mocks.agentGenerate).not.toHaveBeenCalled();
+    expect((await q.listMessages(userId, chatId, { limit: 5 })).at(-1)?.content).toBe("All done.");
+    // Both streamed steps, plus the memory model's call.
+    expect(await q.getUsage(userId, q.currentMonth())).toMatchObject({ inputTokens: 50, outputTokens: 19 });
   });
 
   it("scheduled runs start a new chat", async () => {

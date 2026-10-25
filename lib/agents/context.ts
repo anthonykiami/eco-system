@@ -20,6 +20,8 @@ export type RunContext = TraceContext & {
   onDelegate?: (agent: { id: string; name: string }) => void;
   /** From RunAgentInput; fired after schedule_task creates a (switched-off) task. */
   onTaskScheduled?: (task: { id: string }) => void;
+  /** From RunAgentInput; when set, the top-level turn is streamed. */
+  onPartialText?: (text: string) => void;
 };
 
 export function addUsage(total: TokenUsage, usage: LanguageModelUsage): void {

@@ -83,6 +83,7 @@ runAgent(input: {
   channel: 'web' | 'telegram' | 'scheduled';
   onDelegate?: (agent: { id: string; name: string }) => void; // fired when the primary agent hands work to a specialist
   onTaskScheduled?: (task: { id: string }) => void;          // fired when the agent creates a task; it starts switched off until the user turns it on
+  onPartialText?: (text: string) => void;                    // streams the reply: the text so far, restarting after each tool call; `text` is still the final reply
 }): Promise<{ text: string; chatId: string }>
 ```
 

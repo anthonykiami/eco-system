@@ -1,14 +1,15 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chats, type Chat, type ChatChannel } from "@/lib/db/schema";
 import { getAgent } from "./agents";
 import { NotFoundError } from "./errors";
 
-export type NewChatInput = { agentId: string; channel: ChatChannel };
+export type NewChatInput = { agentId: string; channel: ChatChannel; telegramTopicId?: number | null };
 
+/** `telegramTopicId: null` means chats outside any Telegram topic; omitted means any. */
 export async function listChats(
   userId: string,
-  filter: { agentId?: string; channel?: ChatChannel } = {},
+  filter: { agentId?: string; channel?: ChatChannel; telegramTopicId?: number | null } = {},
 ): Promise<Chat[]> {
   return db
     .select()
@@ -18,6 +19,11 @@ export async function listChats(
         eq(chats.userId, userId),
         filter.agentId ? eq(chats.agentId, filter.agentId) : undefined,
         filter.channel ? eq(chats.channel, filter.channel) : undefined,
+        filter.telegramTopicId === null
+          ? isNull(chats.telegramTopicId)
+          : filter.telegramTopicId !== undefined
+            ? eq(chats.telegramTopicId, filter.telegramTopicId)
+            : undefined,
       ),
     )
     .orderBy(desc(chats.createdAt));
@@ -42,10 +48,20 @@ export async function createChat(userId: string, input: NewChatInput): Promise<C
   return row;
 }
 
-/** Returns the most recent chat for this agent + channel, creating one if none exists. */
+/**
+ * Returns the most recent chat for this agent + channel (+ Telegram topic, none if omitted),
+ * creating one if none exists.
+ */
 export async function getOrCreateChat(userId: string, input: NewChatInput): Promise<Chat> {
-  const [latest] = await listChats(userId, input);
-  return latest ?? createChat(userId, input);
+  const scoped = { ...input, telegramTopicId: input.telegramTopicId ?? null };
+  const [latest] = await listChats(userId, scoped);
+  return latest ?? createChat(userId, scoped);
+}
+
+/** The latest conversation in a Telegram topic, whichever agent it's with. */
+export async function getLatestTopicChat(userId: string, telegramTopicId: number): Promise<Chat | undefined> {
+  const [latest] = await listChats(userId, { telegramTopicId });
+  return latest;
 }
 
 /** Returns true if a row was deleted. */

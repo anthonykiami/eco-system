@@ -104,6 +104,33 @@ describe("POST /api/jobs/run: running", () => {
     expect(sentTexts()).toEqual([{ chat_id: "tg-spec", text: "<b>Coach</b>\nweekly check-in" }]);
   });
 
+  it("sends a specialist's result to its own topic, or to the main chat if that topic is gone", async () => {
+    const { user } = await seedUser("topic@example.com", { telegramChatId: "tg-topic" });
+    const coach = await q.createAgent(user.id, { name: "Coach", soul: "You coach." });
+    await q.updateAgent(user.id, coach.id, { telegramTopicId: 42 });
+    const run = async () => {
+      const job = await q.createJob(user.id, {
+        agentId: coach.id, cronExpression: "0 9 * * *", prompt: "check-in", nextRunAt: new Date(Date.now() + 86_400_000),
+      });
+      await POST(qstashRequest(PATH, { jobId: job.id, userId: user.id, scheduledFor: new Date(Date.now() - 60_000).toISOString() }));
+    };
+    const bodies = () => telegram.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    await run();
+    expect(bodies()).toEqual([expect.objectContaining({ chat_id: "tg-topic", text: "check-in", message_thread_id: 42 })]);
+
+    telegram.mockClear();
+    telegram.mockImplementationOnce(async () =>
+      new Response(JSON.stringify({ ok: false, error_code: 400, description: "Bad Request: message thread not found" }), { status: 400 }),
+    );
+    await run();
+    expect(bodies()).toEqual([
+      expect.objectContaining({ message_thread_id: 42 }),
+      { chat_id: "tg-topic", text: "<b>Coach</b>\ncheck-in", parse_mode: "HTML", link_preview_options: { is_disabled: true } },
+    ]);
+    expect((await q.getAgent(user.id, coach.id))?.telegramTopicId).toBeNull();
+  });
+
   it("does not send anything to Telegram when the user hasn't linked it", async () => {
     const { message } = await seedJob("nolink@example.com");
     const res = await POST(qstashRequest(PATH, message));

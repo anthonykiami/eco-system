@@ -1,6 +1,8 @@
 import { runAgent } from "@/lib/agents";
 import { BudgetExceededError, RateLimitError, type AgentError } from "@/lib/agents/errors";
 import * as q from "@/lib/db/queries";
+import type { Agent } from "@/lib/db/schema";
+import { TelegramApiError } from "@/lib/telegram/api";
 import { redis } from "@/lib/upstash";
 import type { JobMessage } from "./fanout";
 import { sendTelegramMessage } from "./telegram";
@@ -45,7 +47,10 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
     // A reminder is the user's own words sent back at the set time; no agent runs.
     if (job.kind === "reminder") {
       await q.markJobRun(userId, jobId, { lastRunAt: new Date() });
-      if (user?.telegramChatId) await deliver(jobId, user.telegramChatId, `⏰ ${job.prompt}`);
+      if (user?.telegramChatId) {
+        const agent = await q.getAgent(userId, job.agentId);
+        await deliver(userId, jobId, user.telegramChatId, agent, `⏰ ${job.prompt}`);
+      }
       await q.deleteJob(userId, jobId);
       return { status: "reminded" };
     }
@@ -73,10 +78,8 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
     // Record the run before delivery so a Telegram failure never triggers a re-run.
     await q.markJobRun(userId, jobId, { lastRunAt: new Date(), nextRunAt: job.nextRunAt });
     if (user?.telegramChatId) {
-      // Like replies in a live chat, a specialist's result says who it's from.
       const agent = await q.getAgent(userId, job.agentId);
-      const text = agent?.role === "specialized" ? `**${agent.name}**\n${result.text}` : result.text;
-      await deliver(jobId, user.telegramChatId, text);
+      await deliver(userId, jobId, user.telegramChatId, agent, result.text);
     }
     if (job.kind === "once") await q.deleteJob(userId, jobId);
     return { status: "ran", chatId: result.chatId };
@@ -87,10 +90,29 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
   }
 }
 
-/** Sends a job's output to Telegram. A failed send is logged, never retried, so the job can't run twice. */
-async function deliver(jobId: string, telegramChatId: string, text: string): Promise<void> {
+/**
+ * Sends a job's output to Telegram: into the agent's own topic if it has one, otherwise the main
+ * chat, where a specialist's result says who it's from. If the user deleted the topic, the result
+ * goes to the main chat and the agent gets a new topic on their next message. A failed send is
+ * logged, never retried, so the job can't run twice.
+ */
+async function deliver(
+  userId: string,
+  jobId: string,
+  telegramChatId: string,
+  agent: Agent | undefined,
+  text: string,
+): Promise<void> {
+  const labeled = agent?.role === "specialized" ? `**${agent.name}**\n${text}` : text;
   try {
-    await sendTelegramMessage(telegramChatId, text);
+    if (agent?.telegramTopicId == null) return await sendTelegramMessage(telegramChatId, labeled);
+    try {
+      await sendTelegramMessage(telegramChatId, text, agent.telegramTopicId);
+    } catch (err) {
+      if (!(err instanceof TelegramApiError && /thread not found/i.test(err.description))) throw err;
+      await q.updateAgent(userId, agent.id, { telegramTopicId: null });
+      await sendTelegramMessage(telegramChatId, labeled);
+    }
   } catch (err) {
     console.error(`[jobs/run] failed to deliver job ${jobId} to Telegram`, err);
   }

@@ -105,6 +105,8 @@ export const agents = pgTable(
     role: agentRole("role").notNull(),
     description: text("description"),
     soul: text("soul").notNull(),
+    /** The topic this agent has in the user's Telegram chat with the bot, if any. */
+    telegramTopicId: integer("telegram_topic_id"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -123,9 +125,14 @@ export const chats = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
     channel: chatChannel("channel").notNull(),
+    /** The Telegram topic this conversation happens in; null for the main chat and the web. */
+    telegramTopicId: integer("telegram_topic_id"),
     createdAt: createdAt(),
   },
-  (t) => [index("chats_user_id_idx").on(t.userId)],
+  (t) => [
+    index("chats_user_id_idx").on(t.userId),
+    index("chats_user_id_telegram_topic_id_idx").on(t.userId, t.telegramTopicId),
+  ],
 );
 
 export const messages = pgTable(

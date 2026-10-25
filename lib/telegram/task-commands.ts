@@ -17,8 +17,8 @@ import {
   describeJob,
   type DayPreset,
 } from "@/lib/heartbeat/briefing";
-import { answerCallback, editHtml, sendHtml } from "./api";
-import { loadAgents, type BotContext } from "./context";
+import { answerCallback, editHtml } from "./api";
+import { loadAgents, say, type BotContext } from "./context";
 import { escapeHtml } from "./format";
 import * as msg from "./messages";
 import { clearFlow, getFlow, setFlow, type Flow } from "./state";
@@ -105,7 +105,7 @@ function cardView(c: BotContext, job: ScheduledJob, agents: Agent[]): { html: st
 /** /tasks */
 export async function showTasks(c: BotContext): Promise<void> {
   const { html, keyboard } = await listView(c);
-  return sendHtml(c.chatId, html, { keyboard });
+  return say(c, html, { keyboard });
 }
 
 /**
@@ -125,7 +125,7 @@ export async function sendTaskConfirmation(c: BotContext, jobId: string): Promis
     "",
     "It's off until you turn it on.",
   ];
-  return sendHtml(c.chatId, lines.join("\n"), {
+  return say(c, lines.join("\n"), {
     keyboard: {
       inline_keyboard: [
         [
@@ -175,7 +175,7 @@ export async function handleTaskButton(
   // Every id from a button is re-checked against this user's jobs.
   const job = await getJob(userId, arg);
   if (!job) {
-    await sendHtml(c.chatId, msg.STALE_BUTTON);
+    await say(c, msg.STALE_BUTTON);
     return true;
   }
 
@@ -225,7 +225,7 @@ export async function startNewTask(c: BotContext, prompt = ""): Promise<void> {
   const flow: Flow = { kind: "new_task", step: "prompt" };
   await setFlow(c.user.id, flow);
   if (prompt) return continueTaskFlow(c, flow, prompt);
-  return sendHtml(c.chatId, msg.ASK_TASK_PROMPT);
+  return say(c, msg.ASK_TASK_PROMPT);
 }
 
 /** /briefing [time] */
@@ -233,7 +233,7 @@ export async function startBriefing(c: BotContext, time = ""): Promise<void> {
   const flow: Flow = { kind: "new_task", step: "time", prompt: briefingPrompt(""), briefing: true };
   await setFlow(c.user.id, flow);
   if (time) return continueTaskFlow(c, flow, time);
-  return sendHtml(c.chatId, `☀️ ${msg.ASK_TASK_TIME}`);
+  return say(c, `☀️ ${msg.ASK_TASK_TIME}`);
 }
 
 type TaskFlow = Extract<Flow, { kind: "new_task" }>;
@@ -248,31 +248,31 @@ export async function continueTaskFlow(c: BotContext, flow: TaskFlow, text: stri
   const userId = c.user.id;
   switch (flow.step) {
     case "prompt":
-      if (text.length > MAX_PROMPT_LENGTH) return sendHtml(c.chatId, msg.PROMPT_INVALID);
+      if (text.length > MAX_PROMPT_LENGTH) return say(c, msg.PROMPT_INVALID);
       await setFlow(userId, { kind: "new_task", step: "time", prompt: text, briefing: false });
-      return sendHtml(c.chatId, msg.ASK_TASK_TIME);
+      return say(c, msg.ASK_TASK_TIME);
     case "time": {
       const time = parseTimeOfDay(text);
-      if (!time) return sendHtml(c.chatId, msg.TIME_INVALID);
+      if (!time) return say(c, msg.TIME_INVALID);
       await setFlow(userId, { ...flow, step: "days", time });
-      return sendHtml(c.chatId, msg.ASK_TASK_DAYS, { keyboard: daysKeyboard });
+      return say(c, msg.ASK_TASK_DAYS, { keyboard: daysKeyboard });
     }
     default:
-      return sendHtml(c.chatId, msg.USE_BUTTONS);
+      return say(c, msg.USE_BUTTONS);
   }
 }
 
 async function chooseDays(c: BotContext, days: string): Promise<void> {
   const flow = await getFlow(c.user.id);
   if (flow?.kind !== "new_task" || flow.step !== "days" || !isDayPreset(days)) {
-    return sendHtml(c.chatId, msg.STALE_BUTTON);
+    return say(c, msg.STALE_BUTTON);
   }
   const agents = await loadAgents(c.user.id);
   // Briefings belong to the main agent, which can delegate parts of them.
   if (flow.briefing || agents.length === 1) return createTask(c, { ...flow, days }, agents[0]);
 
   await setFlow(c.user.id, { ...flow, step: "agent", days });
-  return sendHtml(c.chatId, msg.ASK_TASK_AGENT, {
+  return say(c, msg.ASK_TASK_AGENT, {
     keyboard: { inline_keyboard: agents.map((a) => [{ text: a.name, callback_data: `fa:${a.id}` }]) },
   });
 }
@@ -281,7 +281,7 @@ async function chooseAgent(c: BotContext, agentId: string): Promise<void> {
   const flow = await getFlow(c.user.id);
   const agent = (await loadAgents(c.user.id)).find((a) => a.id === agentId);
   if (flow?.kind !== "new_task" || flow.step !== "agent" || !agent) {
-    return sendHtml(c.chatId, msg.STALE_BUTTON);
+    return say(c, msg.STALE_BUTTON);
   }
   return createTask(c, flow, agent);
 }
@@ -297,5 +297,5 @@ async function createTask(
   const what = flow.briefing ? "your morning briefing" : `<b>${escapeHtml(taskTitle(job))}</b>`;
   const when = `${describeCron(cronExpression).toLowerCase()} (${escapeHtml(c.user.timezone)})`;
   const first = job.nextRunAt ? ` First one: ${formatRunTime(job.nextRunAt, c.user.timezone)}.` : "";
-  return sendHtml(c.chatId, `✅ Scheduled ${what} ${when}.${first} Manage it with /tasks.`);
+  return say(c, `✅ Scheduled ${what} ${when}.${first} Manage it with /tasks.`);
 }

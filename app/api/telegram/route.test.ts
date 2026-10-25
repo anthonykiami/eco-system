@@ -1092,3 +1092,122 @@ describe("photos and voice messages", () => {
     );
   });
 });
+
+describe("topics and live previews (Threaded Mode)", () => {
+  let nextThreadId = 900;
+  beforeEach(() => {
+    h.redis.store.delete("tg:topics-enabled");
+    fetchMock.mockImplementation(async (url) => {
+      if (url.endsWith("/getMe")) return Response.json({ ok: true, result: { has_topics_enabled: true } });
+      if (url.endsWith("/createForumTopic")) {
+        return Response.json({ ok: true, result: { message_thread_id: nextThreadId++, name: "x" } });
+      }
+      return okResponse(url);
+    });
+  });
+  afterEach(() => {
+    fetchMock.mockImplementation(okResponse);
+    h.redis.store.delete("tg:topics-enabled");
+  });
+
+  const inTopic = (chatId: number, threadId: number, text: string): TelegramUpdate => ({
+    update_id: nextUpdateId++,
+    message: { message_id: 1, chat: { id: chatId, type: "private" }, text, message_thread_id: threadId },
+  });
+  const threadOf = (body: Record<string, unknown>) => body.message_thread_id as number | undefined;
+
+  it("gives each specialist a topic, and a message there goes to that agent in its own conversation", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await q.ensurePrimaryAgent(user.id);
+    // Made on the web: it gets its topic on the next message.
+    const coach = await q.createAgent(user.id, { name: "Coach", soul: "You coach." });
+
+    await post(textUpdate(chatId, "hello"));
+
+    expect(calls("createForumTopic")).toEqual([{ chat_id: chatId, name: "Coach" }]);
+    const threadId = (await q.getAgent(user.id, coach.id))!.telegramTopicId!;
+    expect(threadId).toBeGreaterThanOrEqual(900);
+    expect(sentTexts(chatId)).toContainEqual(expect.stringContaining("🧵 <b>Coach</b> now has its own topic"));
+
+    await post(inTopic(chatId, threadId, "plan my week"));
+
+    const call = runAgentMock.mock.calls.at(-1)![0];
+    const chat = await q.getChat(user.id, call.chatId!);
+    expect(chat).toMatchObject({ agentId: coach.id, telegramTopicId: threadId });
+    const reply = calls("sendMessage").at(-1)!;
+    expect(threadOf(reply)).toBe(threadId);
+    expect(reply.text).toBe("echo: plan my week"); // no name label inside the agent's own topic
+
+    // The main chat keeps its own conversation with the main agent.
+    await post(textUpdate(chatId, "and you?"));
+    const mainChat = await q.getChat(user.id, runAgentMock.mock.calls.at(-1)![0].chatId!);
+    expect(mainChat?.telegramTopicId).toBeNull();
+    expect(calls("createForumTopic")).toHaveLength(1);
+  });
+
+  it("a topic the user made is a fresh conversation with the main agent, and topic notices are ignored", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    const primary = await q.ensurePrimaryAgent(user.id);
+
+    await post({
+      update_id: nextUpdateId++,
+      message: { message_id: 2, chat: { id: chatId, type: "private" }, message_thread_id: 55, forum_topic_created: { name: "Lisbon" } },
+    });
+    expect(sentTexts(chatId)).toEqual([]);
+
+    await post(inTopic(chatId, 55, "find flights"));
+    await post(inTopic(chatId, 55, "cheaper ones"));
+    const [first, second] = runAgentMock.mock.calls.map(([input]) => input.chatId);
+    expect(first).toBe(second);
+    expect(await q.getChat(user.id, first!)).toMatchObject({ agentId: primary.id, telegramTopicId: 55 });
+
+    await post(inTopic(chatId, 55, "/new"));
+    expect(threadOf(calls("sendMessage").at(-1)!)).toBe(55);
+    await post(inTopic(chatId, 55, "start over"));
+    expect(runAgentMock.mock.calls.at(-1)![0].chatId).not.toBe(first);
+  });
+
+  it("renames and deletes an agent's topic along with the agent", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await q.ensurePrimaryAgent(user.id);
+    await post(textUpdate(chatId, "/newagent Researcher"));
+    await post(textUpdate(chatId, "Finds and summarizes sources."));
+    const researcher = (await q.listAgents(user.id)).find((a) => a.name === "Researcher")!;
+    expect(researcher.telegramTopicId).not.toBeNull();
+
+    await post(buttonUpdate(chatId, `ar:${researcher.id}`));
+    await post(textUpdate(chatId, "Scout"));
+    expect(calls("editForumTopic")).toEqual([
+      { chat_id: chatId, message_thread_id: researcher.telegramTopicId, name: "Scout" },
+    ]);
+
+    await post(buttonUpdate(chatId, `ay:${researcher.id}`));
+    expect(calls("deleteForumTopic")).toEqual([{ chat_id: chatId, message_thread_id: researcher.telegramTopicId }]);
+  });
+
+  it("shows the reply as a live preview while it's written, then sends it", async () => {
+    const chatId = nextChatId++;
+    await seedUser({ telegramChatId: chatId });
+    runAgentMock.mockImplementation(async ({ chatId: id, onPartialText }) => {
+      onPartialText?.("Thinking about **your**");
+      onPartialText?.("Thinking about **your** week");
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      return { text: "Your week looks **calm**.", chatId: id! };
+    });
+
+    await post(textUpdate(chatId, "how's my week?"));
+
+    const drafts = calls("sendMessageDraft");
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({
+      chat_id: chatId,
+      text: "Thinking about <b>your</b> week",
+      parse_mode: "HTML",
+      draft_id: expect.any(Number),
+    });
+    expect(lastSent(chatId)).toBe("Your week looks <b>calm</b>.");
+  });
+});

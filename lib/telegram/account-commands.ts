@@ -2,8 +2,7 @@ import { listToolkitConnections, type ToolkitConnection } from "@/lib/agents/com
 import { PLAN_LIMITS, resolvePlan } from "@/lib/agents/limits";
 import { currentMonth, getUsage, updateUser } from "@/lib/db/queries";
 import { rescheduleUserJobs } from "@/lib/heartbeat";
-import { sendHtml } from "./api";
-import type { BotContext } from "./context";
+import { say, type BotContext } from "./context";
 import { escapeHtml } from "./format";
 import * as msg from "./messages";
 import { resolveTimezone } from "./time";
@@ -33,8 +32,8 @@ function connectionState(c: ToolkitConnection): string {
 export async function showConnections(c: BotContext): Promise<void> {
   const connections = await listToolkitConnections(c.user.id);
   const lines = connections.map((conn) => `<b>${escapeHtml(conn.name)}</b>: ${connectionState(conn)}`);
-  return sendHtml(
-    c.chatId,
+  return say(
+    c,
     [
       "<b>Connected accounts</b>",
       "",
@@ -48,21 +47,21 @@ export async function showConnections(c: BotContext): Promise<void> {
 /** /timezone [zone]. Changing it moves scheduled tasks so "07:00" stays 07:00 local time. */
 export async function timezone(c: BotContext, input: string): Promise<void> {
   if (!input) {
-    return sendHtml(
-      c.chatId,
+    return say(
+      c,
       `Your timezone is <b>${escapeHtml(c.user.timezone)}</b>. To change it, send /timezone with a zone, like <code>/timezone America/Chicago</code> or <code>/timezone Europe/London</code>.`,
     );
   }
   const zone = resolveTimezone(input);
   if (!zone) {
-    return sendHtml(
-      c.chatId,
+    return say(
+      c,
       `I don't know the timezone “${escapeHtml(input)}”. Use a zone name like <code>America/Los_Angeles</code>, <code>Europe/Paris</code> or <code>Asia/Tokyo</code>.`,
     );
   }
   await updateUser(c.user.id, { timezone: zone });
   await rescheduleUserJobs(c.user.id);
-  return sendHtml(c.chatId, `✅ Timezone set to <b>${escapeHtml(zone)}</b>. Scheduled tasks now follow it.`);
+  return say(c, `✅ Timezone set to <b>${escapeHtml(zone)}</b>. Scheduled tasks now follow it.`);
 }
 
 /** /usage: this month's tokens against the plan's allowance. */
@@ -72,8 +71,8 @@ export async function usage(c: BotContext): Promise<void> {
   const used = (row?.inputTokens ?? 0) + (row?.outputTokens ?? 0);
   const percent = Math.min(100, Math.round((used / limit) * 100));
   const fmt = (n: number) => n.toLocaleString("en-US");
-  return sendHtml(
-    c.chatId,
+  return say(
+    c,
     [
       "<b>Usage this month</b>",
       `${percent}% of your allowance: ${fmt(used)} of ${fmt(limit)} tokens, across ${fmt(row?.messageCount ?? 0)} messages.`,

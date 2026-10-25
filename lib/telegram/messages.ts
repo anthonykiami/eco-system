@@ -74,6 +74,7 @@ export const HELP = [
   "Just send a message (text, a photo or a voice message): your main agent answers, and hands work to your other agents when it fits.",
   "<code>@name your message</code> sends one message straight to a specific agent. Replying to an agent's message does the same.",
   "/talk — keep talking to one agent · /main — back to the main agent",
+  "Each of your other agents also has its own topic in this chat. Topics you create yourself are fresh conversations with your main agent.",
   "/new — start a fresh conversation",
   "",
   "<b>Agents</b>",
@@ -91,6 +92,9 @@ export const HELP = [
 ].join("\n");
 
 // ─── Conversation ───────────────────────────────────────────────────────────
+
+export const topicCreated = (agent: Agent) =>
+  `🧵 ${name(agent)} now has its own topic. Open it from the topic list to talk to it directly; its scheduled results land there too.`;
 
 export const newChatWith = (agent: Agent) => `🆕 Started a new conversation with ${name(agent)}.`;
 

@@ -7,9 +7,10 @@ import { continueAgentFlow, handleAgentButton, showAgents, startNewAgent } from 
 import { MAIN_SLUG } from "@/lib/agents/naming";
 import { answerCallback, sendHtml } from "./api";
 import { ensureBotCommands } from "./bot-commands";
-import type { BotContext } from "./context";
+import { loadAgents, say, type BotContext } from "./context";
 import { converse, startNewChat, talk } from "./conversation";
 import { downloadImage, mediaOf, transcribe } from "./media";
+import { syncAgentTopics } from "./topics";
 import { normalizeLinkCode, redeemLinkCode } from "./linking";
 import * as msg from "./messages";
 import { clearFlow, getFlow } from "./state";
@@ -39,13 +40,14 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
     return;
   }
   await ensureBotCommands();
+  const threadId = update.message?.message_thread_id ?? update.callback_query?.message?.message_thread_id;
 
   try {
     if (update.message) await handleMessage(update.message);
     else if (update.callback_query) await handleCallback(update.callback_query, chatId);
   } catch (err) {
     console.error(`[telegram] update ${update.update_id} failed`, err);
-    await sendHtml(chatId, msg.GENERIC_ERROR).catch((sendErr) =>
+    await sendHtml(chatId, msg.GENERIC_ERROR, { threadId }).catch((sendErr) =>
       console.error("[telegram] failed to send error reply", sendErr),
     );
   }
@@ -74,9 +76,14 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
     return linkChat(message, command.arg);
   }
 
+  // Telegram announces topics being created or renamed as messages; there's nothing to answer.
+  if (message.forum_topic_created || message.forum_topic_edited) return;
+
   const user = await resolveUser(chatId);
   if (!user) return;
-  const c: BotContext = { user, chatId };
+  const c: BotContext = { user, chatId, threadId: message.message_thread_id };
+  // Agents made on the web, or by an agent in the last turn, get their topic on the next message.
+  await syncAgentTopics(c, await loadAgents(user.id));
 
   if (command) {
     // Any command abandons a half-finished flow, so the user is never stuck in one.
@@ -87,8 +94,8 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
 
   const replyTo = message.reply_to_message?.message_id;
   const media = mediaOf(message);
-  if (media?.kind === "video") return sendHtml(chatId, msg.VIDEO_UNSUPPORTED);
-  if (media?.kind === "file") return sendHtml(chatId, msg.FILE_UNSUPPORTED);
+  if (media?.kind === "video") return say(c, msg.VIDEO_UNSUPPORTED);
+  if (media?.kind === "file") return say(c, msg.FILE_UNSUPPORTED);
   if (media?.kind === "photo") {
     // A photo isn't an answer to a setup question, so it ends any flow and goes to an agent.
     await clearFlow(user.id);
@@ -99,10 +106,10 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
   let input = text;
   if (media?.kind === "voice") {
     const heard = await transcribe(user.id, media);
-    if (!heard.ok) return sendHtml(chatId, msg.voiceProblem(heard.reason));
+    if (!heard.ok) return say(c, msg.voiceProblem(heard.reason));
     input = heard.text;
   }
-  if (!input) return sendHtml(chatId, msg.TEXT_ONLY);
+  if (!input) return say(c, msg.TEXT_ONLY);
 
   const flow = await getFlow(user.id);
   if (flow?.kind === "new_task") return continueTaskFlow(c, flow, input);
@@ -113,13 +120,13 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
 async function runCommand(c: BotContext, { name, arg }: Command, cancelledFlow: boolean): Promise<void> {
   switch (name) {
     case "start":
-      return sendHtml(c.chatId, msg.LINK_SUCCESS);
+      return say(c, msg.LINK_SUCCESS);
     case "link":
-      return sendHtml(c.chatId, msg.LINK_ALREADY_LINKED);
+      return say(c, msg.LINK_ALREADY_LINKED);
     case "help":
-      return sendHtml(c.chatId, msg.HELP);
+      return say(c, msg.HELP);
     case "cancel":
-      return sendHtml(c.chatId, cancelledFlow ? msg.CANCELLED : msg.NOTHING_TO_CANCEL);
+      return say(c, cancelledFlow ? msg.CANCELLED : msg.NOTHING_TO_CANCEL);
     case "new":
       return startNewChat(c);
     case "talk":
@@ -145,7 +152,7 @@ async function runCommand(c: BotContext, { name, arg }: Command, cancelledFlow: 
     case "usage":
       return usage(c);
     default:
-      return sendHtml(c.chatId, msg.HELP);
+      return say(c, msg.HELP);
   }
 }
 
@@ -156,7 +163,7 @@ async function handleCallback(query: TelegramCallbackQuery, chatId: number): Pro
     await answerCallback(query.id);
     return;
   }
-  const c: BotContext = { user, chatId };
+  const c: BotContext = { user, chatId, threadId: query.message.message_thread_id };
   const [action, arg = ""] = (query.data ?? "").split(":", 2);
   const messageId = query.message.message_id;
 
@@ -167,7 +174,7 @@ async function handleCallback(query: TelegramCallbackQuery, chatId: number): Pro
     const task = await handleTaskButton(c, query.id, action, arg, messageId);
     answered = task === "answered";
     if (!task && !(await handleAgentButton(c, action, arg, messageId))) {
-      await sendHtml(chatId, msg.STALE_BUTTON);
+      await say(c, msg.STALE_BUTTON);
     }
   } finally {
     if (!answered) await answerCallback(query.id).catch(() => {});

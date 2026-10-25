@@ -6,8 +6,9 @@ import {
 } from "@/lib/agents/naming";
 import { createAgent, deleteAgent, getAgent, updateAgent } from "@/lib/db/queries";
 import type { Agent } from "@/lib/db/schema";
-import { editHtml, sendHtml } from "./api";
-import { activeAgent, loadAgents, type BotContext } from "./context";
+import { editHtml } from "./api";
+import { deleteAgentTopic, renameAgentTopic, syncAgentTopics } from "./topics";
+import { activeAgent, loadAgents, say, type BotContext } from "./context";
 import { switchTo } from "./conversation";
 import * as msg from "./messages";
 import { clearFlow, getActiveAgentId, setActiveAgentId, setFlow, type Flow } from "./state";
@@ -47,7 +48,7 @@ function cardKeyboard(agent: Agent): InlineKeyboard {
 /** /agents */
 export async function showAgents(c: BotContext): Promise<void> {
   const { html, keyboard } = await listView(c.user.id);
-  return sendHtml(c.chatId, html, { keyboard });
+  return say(c, html, { keyboard });
 }
 
 // ─── Buttons ────────────────────────────────────────────────────────────────
@@ -73,7 +74,7 @@ export async function handleAgentButton(
   // Every id from a button is re-checked against this user's agents.
   const agent = await getAgent(c.user.id, arg);
   if (!agent) {
-    await sendHtml(c.chatId, msg.STALE_BUTTON);
+    await say(c, msg.STALE_BUTTON);
     return true;
   }
 
@@ -86,12 +87,12 @@ export async function handleAgentButton(
       break;
     case "ar":
       await setFlow(c.user.id, { kind: "rename_agent", agentId: agent.id });
-      await sendHtml(c.chatId, msg.askRename(agent));
+      await say(c, msg.askRename(agent));
       break;
     case "ad":
       if (agent.role === "primary") break;
       await setFlow(c.user.id, { kind: "describe_agent", agentId: agent.id });
-      await sendHtml(c.chatId, msg.askRedescribe(agent));
+      await say(c, msg.askRedescribe(agent));
       break;
     case "ax":
       if (agent.role === "primary") break;
@@ -110,7 +111,13 @@ export async function handleAgentButton(
       if (agent.role === "primary") break;
       await deleteAgent(c.user.id, agent.id);
       if ((await getActiveAgentId(c.user.id)) === agent.id) await setActiveAgentId(c.user.id, undefined);
+      // Tapped inside the agent's own topic, the message goes with it, so there's nothing to edit.
+      if (c.threadId !== undefined && c.threadId === agent.telegramTopicId) {
+        await deleteAgentTopic(c, agent.telegramTopicId);
+        break;
+      }
       await editHtml(c.chatId, messageId, msg.agentDeleted(agent.name));
+      await deleteAgentTopic(c, agent.telegramTopicId);
       break;
   }
   return true;
@@ -121,12 +128,12 @@ export async function handleAgentButton(
 /** /newagent [name] */
 export async function startNewAgent(c: BotContext, name = ""): Promise<void> {
   const agents = await loadAgents(c.user.id);
-  if (agents.length - 1 >= MAX_SPECIALISTS) return sendHtml(c.chatId, msg.tooManyAgents(MAX_SPECIALISTS));
+  if (agents.length - 1 >= MAX_SPECIALISTS) return say(c, msg.tooManyAgents(MAX_SPECIALISTS));
   const flow: Flow = { kind: "new_agent", step: "name" };
   // Saved first, so a rejected name leaves the user at the name step rather than nowhere.
   await setFlow(c.user.id, flow);
   if (name) return continueAgentFlow(c, flow, name);
-  return sendHtml(c.chatId, msg.ASK_AGENT_NAME);
+  return say(c, msg.ASK_AGENT_NAME);
 }
 
 /** An error message if `name` can't be used, ignoring the agent being renamed. */
@@ -145,22 +152,22 @@ export async function continueAgentFlow(c: BotContext, flow: AgentFlow, text: st
 
   if (flow.kind === "new_agent" && flow.step === "name") {
     const problem = nameProblem(text, agents);
-    if (problem) return sendHtml(c.chatId, problem);
+    if (problem) return say(c, problem);
     await setFlow(userId, { kind: "new_agent", step: "description", name: text });
-    return sendHtml(c.chatId, msg.askAgentDescription(text));
+    return say(c, msg.askAgentDescription(text));
   }
 
   if (flow.kind === "new_agent") {
-    if (text.length > MAX_AGENT_DESCRIPTION_LENGTH) return sendHtml(c.chatId, msg.DESCRIPTION_INVALID);
+    if (text.length > MAX_AGENT_DESCRIPTION_LENGTH) return say(c, msg.DESCRIPTION_INVALID);
     // Checked again: the main agent may have created agents while this flow was open.
     if (agents.length - 1 >= MAX_SPECIALISTS) {
       await clearFlow(userId);
-      return sendHtml(c.chatId, msg.tooManyAgents(MAX_SPECIALISTS));
+      return say(c, msg.tooManyAgents(MAX_SPECIALISTS));
     }
     const problem = nameProblem(flow.name, agents);
     if (problem) {
       await setFlow(userId, { kind: "new_agent", step: "name" });
-      return sendHtml(c.chatId, problem);
+      return say(c, problem);
     }
     const agent = await createAgent(userId, {
       name: flow.name,
@@ -168,20 +175,21 @@ export async function continueAgentFlow(c: BotContext, flow: AgentFlow, text: st
       soul: buildSpecialistSoul(flow.name, text),
     });
     await clearFlow(userId);
-    return sendHtml(c.chatId, msg.agentCreated(agent), {
+    await say(c, msg.agentCreated(agent), {
       keyboard: { inline_keyboard: [[{ text: `💬 Talk to ${agent.name}`, callback_data: `at:${agent.id}` }]] },
     });
+    return syncAgentTopics(c, [...agents, agent]);
   }
 
   const agent = agents.find((a) => a.id === flow.agentId);
   if (!agent) {
     await clearFlow(userId);
-    return sendHtml(c.chatId, msg.STALE_BUTTON);
+    return say(c, msg.STALE_BUTTON);
   }
 
   if (flow.kind === "rename_agent") {
     const problem = nameProblem(text, agents, agent.id);
-    if (problem) return sendHtml(c.chatId, problem);
+    if (problem) return say(c, problem);
     // Instructions built from the old name are rebuilt; hand-written ones are left alone.
     const generated =
       agent.description !== null && agent.soul === buildSpecialistSoul(agent.name, agent.description);
@@ -190,14 +198,15 @@ export async function continueAgentFlow(c: BotContext, flow: AgentFlow, text: st
       ...(generated ? { soul: buildSpecialistSoul(text, agent.description!) } : {}),
     });
     await clearFlow(userId);
-    return sendHtml(c.chatId, msg.agentRenamed(updated ?? agent));
+    if (updated) await renameAgentTopic(c, updated);
+    return say(c, msg.agentRenamed(updated ?? agent));
   }
 
-  if (text.length > MAX_AGENT_DESCRIPTION_LENGTH) return sendHtml(c.chatId, msg.DESCRIPTION_INVALID);
+  if (text.length > MAX_AGENT_DESCRIPTION_LENGTH) return say(c, msg.DESCRIPTION_INVALID);
   const updated = await updateAgent(userId, agent.id, {
     description: text,
     soul: buildSpecialistSoul(agent.name, text),
   });
   await clearFlow(userId);
-  return sendHtml(c.chatId, msg.agentRedescribed(updated ?? agent));
+  return say(c, msg.agentRedescribed(updated ?? agent));
 }

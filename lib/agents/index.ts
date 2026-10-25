@@ -50,6 +50,7 @@ export const runAgent: RunAgent = async ({
   channel,
   onDelegate,
   onTaskScheduled,
+  onPartialText,
 }) => {
   ensureTracing();
   const user = await enforceLimits(userId);
@@ -65,6 +66,7 @@ export const runAgent: RunAgent = async ({
     usage: { inputTokens: 0, outputTokens: 0 },
     onDelegate,
     onTaskScheduled,
+    onPartialText,
   };
 
   try {

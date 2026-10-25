@@ -42,11 +42,13 @@ const isParseError = (err: unknown) =>
  * that chunk is re-sent as plain text so the user still gets the reply.
  * A keyboard is attached to the last chunk, so its buttons sit under the end of the text.
  */
-export async function sendHtml(
-  chatId: number | string,
-  html: string,
-  options: { keyboard?: InlineKeyboard } = {},
-): Promise<void> {
+export type SendOptions = {
+  keyboard?: InlineKeyboard;
+  /** The topic to post in; omitted means the main chat. */
+  threadId?: number;
+};
+
+export async function sendHtml(chatId: number | string, html: string, options: SendOptions = {}): Promise<void> {
   await sendHtmlMessages(chatId, html, options);
 }
 
@@ -54,12 +56,13 @@ export async function sendHtml(
 export async function sendHtmlMessages(
   chatId: number | string,
   html: string,
-  { keyboard }: { keyboard?: InlineKeyboard } = {},
+  { keyboard, threadId }: SendOptions = {},
 ): Promise<number[]> {
   const chunks = splitTelegramHtml(html);
   const ids: number[] = [];
+  const thread = threadId ? { message_thread_id: threadId } : {};
   for (const [i, chunk] of chunks.entries()) {
-    const markup = keyboard && i === chunks.length - 1 ? { reply_markup: keyboard } : {};
+    const markup = { ...thread, ...(keyboard && i === chunks.length - 1 ? { reply_markup: keyboard } : {}) };
     let sent: { message_id?: number };
     try {
       sent = await callTelegram("sendMessage", {
@@ -117,9 +120,13 @@ export async function answerCallback(callbackQueryId: string, text?: string): Pr
  * Shows "typing…" until the returned stop function is called. Telegram clears the action
  * after about 5 seconds, so it's refreshed every 4.
  */
-export function startTyping(chatId: number): () => void {
+export function startTyping(chatId: number, threadId?: number): () => void {
   const send = () =>
-    callTelegram("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
+    callTelegram("sendChatAction", {
+      chat_id: chatId,
+      action: "typing",
+      ...(threadId ? { message_thread_id: threadId } : {}),
+    }).catch(() => {});
   void send();
   const timer = setInterval(send, 4_000);
   return () => clearInterval(timer);
@@ -135,4 +142,38 @@ export async function downloadFile(fileId: string): Promise<Uint8Array> {
   const res = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
   if (!res.ok) throw new TelegramApiError("downloadFile", res.status, res.statusText);
   return new Uint8Array(await res.arrayBuffer());
+}
+
+/**
+ * Shows `html` as a live preview of a reply that's still being written (bots with Threaded Mode).
+ * Updates with the same draftId replace each other; the preview disappears unless followed by a
+ * real message.
+ */
+export async function sendMessageDraft(
+  chatId: number,
+  draftId: number,
+  html: string,
+  threadId?: number,
+): Promise<void> {
+  await callTelegram("sendMessageDraft", {
+    chat_id: chatId,
+    draft_id: draftId,
+    text: html,
+    parse_mode: "HTML",
+    ...(threadId ? { message_thread_id: threadId } : {}),
+  });
+}
+
+/** Creates a topic in the chat and returns its thread id. */
+export async function createForumTopic(chatId: number | string, name: string): Promise<number> {
+  const topic = await callTelegram<{ message_thread_id: number }>("createForumTopic", { chat_id: chatId, name });
+  return topic.message_thread_id;
+}
+
+export async function renameForumTopic(chatId: number | string, threadId: number, name: string): Promise<void> {
+  await callTelegram("editForumTopic", { chat_id: chatId, message_thread_id: threadId, name });
+}
+
+export async function deleteForumTopic(chatId: number | string, threadId: number): Promise<void> {
+  await callTelegram("deleteForumTopic", { chat_id: chatId, message_thread_id: threadId });
 }

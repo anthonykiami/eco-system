@@ -73,6 +73,13 @@ describe("per-user isolation in lib/db/queries", () => {
       expect(await q.listChats(a.userId, { agentId: b.agent.id })).toEqual([]);
     });
 
+    it("chats: Telegram topics are per user", async () => {
+      const topicChat = await q.createChat(b.userId, { agentId: b.agent.id, channel: "telegram", telegramTopicId: 7 });
+      expect(await q.getLatestTopicChat(a.userId, 7)).toBeUndefined();
+      expect((await q.getLatestTopicChat(b.userId, 7))?.id).toBe(topicChat.id);
+      expect(await q.deleteChat(b.userId, topicChat.id)).toBe(true);
+    });
+
     it("messages", async () => {
       expect(await q.getMessage(a.userId, b.message.id)).toBeUndefined();
       expect(await q.listMessages(a.userId, b.chat.id)).toEqual([]);
@@ -97,6 +104,7 @@ describe("per-user isolation in lib/db/queries", () => {
   describe("writes against the other user's rows are no-ops", () => {
     it("agents", async () => {
       expect(await q.updateAgent(a.userId, b.agent.id, { name: "pwned", soul: "x" })).toBeUndefined();
+      expect(await q.updateAgent(a.userId, b.agent.id, { telegramTopicId: 5 })).toBeUndefined();
       expect(await q.deleteAgent(a.userId, b.agent.id)).toBe(false);
       await expectBUntouched();
     });

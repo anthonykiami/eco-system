@@ -22,6 +22,13 @@
       "when": 1792883606849,
       "tag": "0002_one_off_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792886720240,
+      "tag": "0003_telegram_topics",
+      "breakpoints": true
     }
   ]
 }

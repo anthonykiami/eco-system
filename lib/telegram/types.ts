@@ -28,6 +28,11 @@ export const telegramMessageSchema = z.object({
   video_note: timedFileSchema.optional(),
   video: timedFileSchema.optional(),
   document: fileSchema.extend({ mime_type: z.string().optional(), file_name: z.string().optional() }).optional(),
+  /** The topic the message was sent in; absent in the main chat. */
+  message_thread_id: z.number().optional(),
+  /** Telegram's notices that a topic was created or renamed; the bot ignores them. */
+  forum_topic_created: z.object({}).passthrough().optional(),
+  forum_topic_edited: z.object({}).passthrough().optional(),
   /** Set when the user replies to an earlier message; only its id is read. */
   reply_to_message: z.object({ message_id: z.number() }).optional(),
 });

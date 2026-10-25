@@ -1,4 +1,4 @@
-import { generateText, stepCountIs, type ModelMessage, type ToolSet, type UserContent } from "ai";
+import { generateText, stepCountIs, streamText, type ModelMessage, type ToolSet, type UserContent } from "ai";
 import type { Agent, Message } from "@/lib/db/schema";
 import { telemetryFor } from "@/lib/tracing";
 import { addUsage, type RunContext } from "../context";
@@ -90,19 +90,40 @@ export async function runAgentTurn({
 }): Promise<string> {
   const memories = await recallMemories(ctx.userId, message);
 
-  const result = await generateText({
+  const options = {
     model: agentModel(ctx.plan),
     system: buildSystemPrompt(agent.soul, memories, {
       timezone: ctx.timezone,
       integrationNotes: ctx.integrationNotes,
     }),
-    messages: [...toModelMessages(history), { role: "user", content: userContent(message, images) }],
+    messages: [...toModelMessages(history), { role: "user" as const, content: userContent(message, images) }],
     tools,
     stopWhen: stepCountIs(PLAN_LIMITS[ctx.plan].maxSteps),
     // Delegations receive this call's abortSignal, so they share the same budget.
     timeout: { totalMs: ctx.channel === "scheduled" ? SCHEDULED_TURN_TIMEOUT_MS : TURN_TIMEOUT_MS },
     ...telemetryFor(agent.role === "primary" ? "primary-agent" : `agent:${agent.name}`, ctx),
-  });
-  addUsage(ctx.usage, result.totalUsage);
+  };
+
+  if (!ctx.onPartialText) {
+    const result = await generateText(options);
+    addUsage(ctx.usage, result.totalUsage);
+    return result.text;
+  }
+
+  const result = streamText(options);
+  let partial = "";
+  for await (const part of result.stream) {
+    if (part.type === "start-step") partial = "";
+    else if (part.type === "error") throw part.error;
+    else if (part.type === "text-delta") {
+      partial += part.text;
+      try {
+        ctx.onPartialText(partial);
+      } catch (err) {
+        console.error("[agents] onPartialText listener failed", err);
+      }
+    }
+  }
+  addUsage(ctx.usage, await result.totalUsage);
   return result.text;
 }

@@ -5,7 +5,7 @@ import { agents, type Agent } from "@/lib/db/schema";
 
 export type NewAgentInput = Pick<Agent, "name" | "soul"> &
   Partial<Pick<Agent, "role" | "description">>;
-export type AgentPatch = Partial<Pick<Agent, "name" | "description" | "soul">>;
+export type AgentPatch = Partial<Pick<Agent, "name" | "description" | "soul" | "telegramTopicId">>;
 
 export async function listAgents(userId: string): Promise<Agent[]> {
   return db.select().from(agents).where(eq(agents.userId, userId)).orderBy(asc(agents.createdAt));

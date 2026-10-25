@@ -8,6 +8,7 @@ const agent = (name: string, role: Agent["role"] = "specialized"): Agent => ({
   userId: "u",
   name,
   role,
+  telegramTopicId: null,
   description: null,
   soul: "",
   createdAt: new Date(),

@@ -25,6 +25,12 @@ export interface RunAgentInput {
    * agent read (an email, a web page) can't plant a recurring job; the caller lets the user turn it on.
    */
   onTaskScheduled?: (task: { id: string }) => void;
+  /**
+   * Streams the reply: called with the text written so far as the model writes it. When the agent
+   * goes on to use a tool, the next text starts over, so callers show the latest value as a preview.
+   * The returned `text` is still the final reply.
+   */
+  onPartialText?: (text: string) => void;
 }
 
 export interface RunAgentResult {
