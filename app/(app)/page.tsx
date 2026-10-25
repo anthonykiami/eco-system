@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { formatAgo, formatCompact, formatNumber, formatWhen, greeting, preview } from "@/components/format";
 import { SystemHealth } from "@/components/system-health";
+import { TodaySkeleton, TodayView } from "@/components/today";
 import { Badge, Card, EmptyState, LinkButton, Meter, Status } from "@/components/ui";
 import { listToolkitConnections } from "@/lib/agents/composio";
 import { PLAN_LIMITS, resolvePlan } from "@/lib/agents/limits";
@@ -83,6 +84,12 @@ export default async function Dashboard() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">
+          <Card title="Today">
+            <Suspense fallback={<TodaySkeleton />}>
+              <TodayView userId={userId} timeZone={timezone} />
+            </Suspense>
+          </Card>
+
           <Card title="Coming up" action={<Link href="/settings/schedules" className="text-muted hover:text-foreground">All tasks →</Link>}>
             {upcoming.length === 0 ? (
               <EmptyState>

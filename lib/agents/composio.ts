@@ -187,9 +187,19 @@ const emailKey = (userId: string, accountId: string) => `composio:account-email:
 
 const asEmail = (value: unknown) => (typeof value === "string" && value.includes("@") ? value : undefined);
 
-/** Asks the provider which address this connection belongs to, through a session pinned to it. */
-async function fetchAccountEmail(userId: string, slug: ToolkitSlug, accountId: string): Promise<string | undefined> {
-  const tool = PROFILE_TOOLS[slug];
+export type ToolResult = { successful?: boolean; error?: unknown; data?: Record<string, unknown> };
+
+/**
+ * Runs one Composio tool for the app itself (not the agent) on one of this user's connections.
+ * `accountId` must come from this user's own connections; Composio also refuses others.
+ */
+export async function executeForAccount(
+  userId: string,
+  slug: ToolkitSlug,
+  accountId: string,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
   const session = await composio().create(userId, {
     toolkits: [slug.toLowerCase()],
     tools: { [slug.toLowerCase()]: { enable: [tool] } },
@@ -199,10 +209,15 @@ async function fetchAccountEmail(userId: string, slug: ToolkitSlug, accountId: s
     sandbox: { enable: false },
   });
   const tools = (await session.tools()) as ToolSet;
-  const result = (await tools[tool]?.execute?.({}, { toolCallId: "account-email", messages: [], context: {} })) as
-    | { data?: Record<string, unknown> }
-    | undefined;
-  return asEmail(result?.data?.email) ?? asEmail(result?.data?.emailAddress);
+  const run = tools[tool]?.execute;
+  if (!run) throw new Error(`Composio didn't offer ${tool}`);
+  return (await run(args, { toolCallId: tool, messages: [], context: {} })) as ToolResult;
+}
+
+/** Asks the provider which address this connection belongs to. */
+async function fetchAccountEmail(userId: string, slug: ToolkitSlug, accountId: string): Promise<string | undefined> {
+  const result = await executeForAccount(userId, slug, accountId, PROFILE_TOOLS[slug], {});
+  return asEmail(result.data?.email) ?? asEmail(result.data?.emailAddress);
 }
 
 /** The address a connection belongs to, so the user and the agent can tell accounts apart. Cached. */
@@ -272,6 +287,12 @@ async function authConfigIdFor(slug: ToolkitSlug): Promise<string> {
 
   authConfigIds.set(slug, id);
   return id;
+}
+
+/** This user's working connections per toolkit, oldest first, with their emails. */
+export async function listConnectedAccounts(userId: string): Promise<Map<ToolkitSlug, ConnectedAccount[]>> {
+  const { items } = await composio().connectedAccounts.list({ userIds: [userId], statuses: ["ACTIVE"], limit: 100 });
+  return activeAccounts(userId, items);
 }
 
 /** Every toolkit in the catalog with this user's connections, if any. */
