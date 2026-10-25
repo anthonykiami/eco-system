@@ -40,7 +40,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="glass sticky top-0 z-10 border-b border-line md:hidden">
+        <header className="glass sticky top-0 z-10 border-b border-line pt-[env(safe-area-inset-top)] md:hidden">
           <div className="flex items-center justify-between px-4 py-3">
             <span className="flex items-center gap-2">
               <LogoMark className="h-7 w-7" />

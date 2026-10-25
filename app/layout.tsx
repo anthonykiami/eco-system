@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Manrope } from "next/font/google";
 import "./globals.css";
 
@@ -15,6 +15,16 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ECO-SYSTEM",
   description: "Your AI agents, working together",
+  applicationName: "ECO-SYSTEM",
+  // Installed on an iPhone home screen: full screen, content under a translucent status bar.
+  appleWebApp: { capable: true, title: "ECO-SYSTEM", statusBarStyle: "black-translucent" },
+  icons: { icon: "/icons/favicon-32.png", apple: "/apple-touch-icon.png" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#040907",
+  // Lets the installed app use the whole screen; padding keeps content clear of the notch.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
