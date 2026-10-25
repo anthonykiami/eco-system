@@ -920,6 +920,8 @@ describe("account commands", () => {
         slug: "GMAIL",
         name: "Gmail",
         description: "",
+        logo: null,
+        builtIn: true,
         access: [{ id: "draft", label: "Read and draft", description: "" }],
         currentAccess: "draft",
         accounts: [
@@ -932,6 +934,8 @@ describe("account commands", () => {
         slug: "GOOGLECALENDAR",
         name: "Google Calendar",
         description: "",
+        logo: null,
+        builtIn: true,
         access: [],
         currentAccess: "read",
         accounts: [],

@@ -24,6 +24,7 @@ export const MAIN_NAV: Item[] = [
 
 export const ADMIN_NAV: Item[] = [
   { href: "/admin", label: "System & users", icon: icon("M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z") },
+  { href: "/admin/integrations", label: "App catalog", icon: icon("M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm12.5 0v7M13 16.5h7") },
 ];
 
 /** The most specific item matching the path is the active one ("/settings" isn't active on "/settings/telegram"). */

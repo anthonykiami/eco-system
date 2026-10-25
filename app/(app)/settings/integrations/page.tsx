@@ -46,7 +46,15 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/set
           return (
             <Card
               key={toolkit.slug}
-              title={toolkit.name}
+              title={
+                <span className="flex items-center gap-2.5">
+                  {toolkit.logo && (
+                    // eslint-disable-next-line @next/next/no-img-element -- small logos from Composio's CDN
+                    <img src={toolkit.logo} alt="" className="h-7 w-7 rounded-md bg-white object-contain p-0.5" />
+                  )}
+                  {toolkit.name}
+                </span>
+              }
               action={
                 connected ? (
                   <Badge tone="success">{toolkit.accounts.length === 1 ? "connected" : `${toolkit.accounts.length} accounts`}</Badge>
@@ -57,7 +65,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/set
                 )
               }
             >
-              <p className="-mt-2 text-sm text-muted">{toolkit.description}</p>
+              <p className="-mt-2 line-clamp-3 text-sm text-muted">{toolkit.description}</p>
 
               {connected ? (
                 <div className="flex flex-col gap-2">
@@ -84,8 +92,8 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/set
                     </Button>
                   </form>
                   <p className="text-xs text-muted">
-                    Pick the account on Google&apos;s sign-in screen. If Google doesn&apos;t ask, sign in to that account in
-                    this browser first.
+                    Pick the account on the sign-in screen. If it doesn&apos;t ask, sign in to that account in this
+                    browser first.
                   </p>
                 </div>
               ) : (

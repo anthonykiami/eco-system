@@ -3,6 +3,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -212,8 +213,31 @@ export const integrationAccess = pgTable(
   (t) => [uniqueIndex("integration_access_user_id_toolkit_unique").on(t.userId, t.toolkit)],
 );
 
+/**
+ * Apps the owner added from Composio's catalog, offered to every user next to the built-in
+ * Gmail and Calendar. Not user-owned: anyone can read it, only admins change it (admin.ts).
+ */
+export const integrationCatalog = pgTable("integration_catalog", {
+  /** Composio toolkit slug, uppercase (e.g. NOTION). */
+  slug: text("slug").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  logo: text("logo"),
+  /**
+   * The app's working set of tools: the ones Composio tags "important" (big apps have hundreds,
+   * too many to give an agent every turn). This is the "Full access" level.
+   */
+  fullTools: jsonb("full_tools").$type<string[]>().notNull().default([]),
+  /** The read-only ones among them: the "Read only" level. */
+  readTools: jsonb("read_tools").$type<string[]>().notNull().default([]),
+  /** The ones that don't delete or destroy anything: the "Read and write" level. */
+  safeTools: jsonb("safe_tools").$type<string[]>().notNull().default([]),
+  addedAt: timestamp("added_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+});
+
 // ─── Inferred types ─────────────────────────────────────────────────────────
 
+export type CatalogIntegration = typeof integrationCatalog.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type UserStatus = (typeof userStatus.enumValues)[number];

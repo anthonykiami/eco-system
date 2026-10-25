@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { adminListUsage, adminSetUserPlan } from "./admin";
+import { adminAddIntegration, adminListUsage, adminRemoveIntegration, adminSetUserPlan } from "./admin";
+import { listIntegrationCatalog } from "./catalog";
 import { incrementUsage } from "./usage";
 import { getUser } from "./users";
 
@@ -31,5 +32,23 @@ describe("adminListUsage", () => {
 
     expect(rows.map((r) => r.userId)).toContain(b.id);
     expect(rows.map((r) => r.userId)).not.toContain(a.id);
+  });
+});
+
+describe("integration catalog", () => {
+  const notion = { slug: "NOTION", name: "Notion", description: "Docs", logo: null, fullTools: ["NOTION_SEARCH"], readTools: ["NOTION_SEARCH"], safeTools: ["NOTION_SEARCH"] };
+
+  it("adds an app, refreshes it in place, lists it for everyone and removes it", async () => {
+    await adminAddIntegration(notion);
+    await adminAddIntegration({ ...notion, readTools: ["NOTION_SEARCH", "NOTION_FETCH"] });
+
+    const list = await listIntegrationCatalog();
+    expect(list.filter((e) => e.slug === "NOTION")).toEqual([
+      expect.objectContaining({ readTools: ["NOTION_SEARCH", "NOTION_FETCH"] }),
+    ]);
+
+    expect(await adminRemoveIntegration("NOTION")).toBe(true);
+    expect(await adminRemoveIntegration("NOTION")).toBe(false);
+    expect((await listIntegrationCatalog()).some((e) => e.slug === "NOTION")).toBe(false);
   });
 });

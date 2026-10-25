@@ -1,7 +1,8 @@
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { asSchema, jsonSchema, type JSONSchema7, type ToolSet } from "ai";
-import { listIntegrationAccess } from "@/lib/db/queries";
+import { listIntegrationAccess, listIntegrationCatalog } from "@/lib/db/queries";
+import type { CatalogIntegration } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { redis } from "@/lib/upstash";
 
@@ -124,21 +125,158 @@ export const TOOLKITS = [
   access: readonly AccessLevel[];
 }[];
 
-export type ToolkitSlug = (typeof TOOLKITS)[number]["slug"];
+/** A Composio toolkit slug, uppercase (GMAIL, NOTION…). */
+export type ToolkitSlug = string;
 
-export const isToolkitSlug = (value: string): value is ToolkitSlug =>
-  TOOLKITS.some((t) => t.slug === value);
+/** An app users can connect: a built-in one above, or one the owner added from Composio's catalog. */
+export type Toolkit = {
+  slug: ToolkitSlug;
+  name: string;
+  description: string;
+  logo: string | null;
+  defaultAccess: string;
+  /** Levels from least to most; the user picks one. */
+  access: readonly AccessLevel[];
+  builtIn: boolean;
+};
 
-const toolkitBySlug = (slug: string) => TOOLKITS.find((t) => t.slug === slug.toUpperCase());
+const logoFor = (slug: string) => `https://logos.composio.dev/api/${slug.toLowerCase()}`;
 
-export const isAccessLevel = (slug: ToolkitSlug, level: string): boolean =>
-  toolkitBySlug(slug)!.access.some((a: AccessLevel) => a.id === level);
+/**
+ * Access levels for an app added from the catalog, built from Composio's tool hints (see
+ * classifyTools): read-only tools, then ones that don't delete or destroy, then all of its working
+ * set. Starts read-only.
+ */
+export function catalogToolkit(entry: CatalogIntegration): Toolkit {
+  const { slug, name } = entry;
+  return {
+    slug,
+    name,
+    description: entry.description,
+    logo: entry.logo,
+    builtIn: false,
+    defaultAccess: "read",
+    access: [
+      {
+        id: "read",
+        label: "Read only",
+        description: "Look things up. Can't create, change or delete anything.",
+        tools: entry.readTools,
+        agentNote: `${name} is read-only: you can look things up but not create, change or delete anything. Say so if asked.`,
+      },
+      {
+        id: "write",
+        label: "Read and write",
+        description: "Also creates and updates things for you. Never deletes.",
+        tools: entry.safeTools,
+        agentNote: `${name} can't delete: you can create and update things but not remove them. Say so if asked.`,
+      },
+      {
+        id: "full",
+        label: "Full access",
+        description: "Everything, including deleting.",
+        tools: entry.fullTools,
+      },
+    ],
+  };
+}
+
+/** An app in Composio's catalog that users can connect with one click (Composio handles sign-in). */
+export type CatalogApp = {
+  slug: ToolkitSlug;
+  name: string;
+  description: string;
+  logo: string | null;
+  categories: string[];
+  toolsCount: number;
+};
+
+const CATALOG_CACHE_KEY = "composio:one-click-apps:v1";
+const CATALOG_CACHE_SECONDS = 12 * 60 * 60;
+
+type ComposioToolkit = {
+  slug: string;
+  name: string;
+  composioManagedAuthSchemes?: string[];
+  meta?: { description?: string; logo?: string; toolsCount?: number; categories?: { name?: string }[] };
+};
+
+/**
+ * Composio's apps that work with Composio-managed sign-in, like Gmail does: no developer setup
+ * on our side. Apps that need the user's own API key aren't offered yet. Cached for 12 hours.
+ */
+export async function listOneClickApps(): Promise<CatalogApp[]> {
+  const cached = await redis.get<CatalogApp[]>(CATALOG_CACHE_KEY).catch(() => null);
+  if (cached) return cached;
+  const result = (await composio().toolkits.get({ limit: 1000 })) as unknown;
+  const items = (Array.isArray(result) ? result : ((result as { items?: unknown[] }).items ?? [])) as ComposioToolkit[];
+  const apps = items
+    .filter((t) => t.composioManagedAuthSchemes?.length)
+    .map((t) => ({
+      slug: t.slug.toUpperCase(),
+      name: t.name,
+      description: t.meta?.description ?? "",
+      logo: t.meta?.logo ?? null,
+      categories: (t.meta?.categories ?? []).flatMap((c) => (c.name ? [c.name] : [])),
+      toolsCount: t.meta?.toolsCount ?? 0,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  await redis.set(CATALOG_CACHE_KEY, apps, { ex: CATALOG_CACHE_SECONDS }).catch(() => {});
+  return apps;
+}
+
+type RawTool = { slug: string; tags?: string[]; isDeprecated?: boolean };
+
+/** The most tools an added app gives the agent when Composio tags none "important". */
+export const MAX_APP_TOOLS = 60;
+
+/**
+ * An added app's tools for each level. The working set is what Composio tags "important" (GitHub
+ * has ~900 tools, ~70 important), or the first MAX_APP_TOOLS if it tags none. Within it: the
+ * read-only tools, and the ones that never delete or destroy.
+ */
+export function classifyTools(tools: RawTool[]): { fullTools: string[]; readTools: string[]; safeTools: string[] } {
+  const has = (t: RawTool, tag: string) => (t.tags ?? []).includes(tag);
+  const live = tools.filter((t) => !t.isDeprecated);
+  const important = live.filter((t) => has(t, "important"));
+  const working = important.length > 0 ? important : live.slice(0, MAX_APP_TOOLS);
+  const slugs = (list: RawTool[]) => list.map((t) => t.slug.toUpperCase());
+  return {
+    fullTools: slugs(working),
+    readTools: slugs(working.filter((t) => has(t, "readOnlyHint"))),
+    safeTools: slugs(working.filter((t) => !has(t, "destructiveHint") && !has(t, "deleteHint"))),
+  };
+}
+
+/** What the catalog stores for an app: its details and tool lists, fetched from Composio now. */
+export async function describeOneClickApp(slug: ToolkitSlug): Promise<Omit<CatalogIntegration, "addedAt"> | undefined> {
+  const app = (await listOneClickApps()).find((a) => a.slug === slug.toUpperCase());
+  if (!app) return undefined;
+  const tools = (await composio().tools.getRawComposioTools({ toolkits: [app.slug.toLowerCase()], limit: 1000 })) as RawTool[];
+  return { slug: app.slug, name: app.name, description: app.description, logo: app.logo, ...classifyTools(tools) };
+}
+
+/** The built-in toolkits plus the apps the owner added, in that order. */
+export async function getToolkits(): Promise<Toolkit[]> {
+  let added: CatalogIntegration[] = [];
+  try {
+    added = await listIntegrationCatalog();
+  } catch (err) {
+    console.error("[composio] could not read the integration catalog", err);
+  }
+  const builtIn: Toolkit[] = TOOLKITS.map((t) => ({ ...t, logo: logoFor(t.slug), builtIn: true }));
+  return [...builtIn, ...added.filter((e) => !builtIn.some((b) => b.slug === e.slug)).map(catalogToolkit)];
+}
+
+export const findToolkit = (toolkits: readonly Toolkit[], slug: string): Toolkit | undefined =>
+  toolkits.find((t) => t.slug === slug.toUpperCase());
+
+export const isAccessLevel = (toolkit: Toolkit, level: string): boolean =>
+  toolkit.access.some((a) => a.id === level);
 
 /** The saved level for a toolkit, or its default when none is saved or the saved one is gone. */
-export function resolveAccess(slug: ToolkitSlug, saved?: string): AccessLevel {
-  const toolkit = toolkitBySlug(slug)!;
-  const levels: readonly AccessLevel[] = toolkit.access;
-  return levels.find((a) => a.id === saved) ?? levels.find((a) => a.id === toolkit.defaultAccess)!;
+export function resolveAccess(toolkit: Toolkit, saved?: string): AccessLevel {
+  return toolkit.access.find((a) => a.id === saved) ?? toolkit.access.find((a) => a.id === toolkit.defaultAccess)!;
 }
 
 async function savedAccess(userId: string): Promise<Map<string, string>> {
@@ -153,6 +291,8 @@ export type ToolkitConnection = {
   slug: ToolkitSlug;
   name: string;
   description: string;
+  logo: string | null;
+  builtIn: boolean;
   access: readonly AccessLevel[];
   /** The level in effect for this user. */
   currentAccess: string;
@@ -177,7 +317,7 @@ const byCreation = (a: ComposioAccount, b: ComposioAccount) =>
   (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
 
 /** Asked for an account's email when Composio doesn't store one. Both return it in `data.email*`. */
-const PROFILE_TOOLS: Record<ToolkitSlug, string> = {
+const PROFILE_TOOLS: Partial<Record<ToolkitSlug, string>> = {
   GMAIL: "GMAIL_GET_PROFILE",
   GOOGLECALENDAR: "GOOGLECALENDAR_GET_CURRENT_USER",
 };
@@ -216,14 +356,16 @@ export async function executeForAccount(
 
 /** Asks the provider which address this connection belongs to. */
 async function fetchAccountEmail(userId: string, slug: ToolkitSlug, accountId: string): Promise<string | undefined> {
-  const result = await executeForAccount(userId, slug, accountId, PROFILE_TOOLS[slug], {});
+  const tool = PROFILE_TOOLS[slug];
+  if (!tool) return undefined;
+  const result = await executeForAccount(userId, slug, accountId, tool, {});
   return asEmail(result.data?.email) ?? asEmail(result.data?.emailAddress);
 }
 
 /** The address a connection belongs to, so the user and the agent can tell accounts apart. Cached. */
 async function accountEmail(userId: string, slug: ToolkitSlug, account: ComposioAccount): Promise<string | undefined> {
   const stored = asEmail(account.data?.displayName);
-  if (stored) return stored;
+  if (stored || !PROFILE_TOOLS[slug]) return stored;
   try {
     const cached = await redis.get<string>(emailKey(userId, account.id));
     if (cached) return cached;
@@ -244,11 +386,12 @@ async function accountEmail(userId: string, slug: ToolkitSlug, account: Composio
 async function activeAccounts(
   userId: string,
   accounts: ComposioAccount[],
+  toolkits: readonly Toolkit[],
   { onlyToTellApart = false } = {},
 ): Promise<Map<ToolkitSlug, ConnectedAccount[]>> {
   const result = new Map<ToolkitSlug, ConnectedAccount[]>();
   await Promise.all(
-    TOOLKITS.map(async ({ slug }) => {
+    toolkits.map(async ({ slug }) => {
       const mine = accounts
         .filter((a) => a.toolkit.slug.toUpperCase() === slug && a.status === "ACTIVE")
         .sort(byCreation);
@@ -291,13 +434,16 @@ async function authConfigIdFor(slug: ToolkitSlug): Promise<string> {
 
 /** This user's working connections per toolkit, oldest first, with their emails. */
 export async function listConnectedAccounts(userId: string): Promise<Map<ToolkitSlug, ConnectedAccount[]>> {
-  const { items } = await composio().connectedAccounts.list({ userIds: [userId], statuses: ["ACTIVE"], limit: 100 });
-  return activeAccounts(userId, items);
+  const [{ items }, toolkits] = await Promise.all([
+    composio().connectedAccounts.list({ userIds: [userId], statuses: ["ACTIVE"], limit: 100 }),
+    getToolkits(),
+  ]);
+  return activeAccounts(userId, items, toolkits);
 }
 
 /** Every toolkit in the catalog with this user's connections, if any. */
 export async function listToolkitConnections(userId: string): Promise<ToolkitConnection[]> {
-  const saved = await savedAccess(userId);
+  const [saved, toolkits] = await Promise.all([savedAccess(userId), getToolkits()]);
   let accounts: ComposioAccount[] = [];
   try {
     const { items } = await composio().connectedAccounts.list({ userIds: [userId], limit: 100 });
@@ -305,9 +451,9 @@ export async function listToolkitConnections(userId: string): Promise<ToolkitCon
   } catch (err) {
     console.error("[composio] could not list connections", err);
   }
-  const active = await activeAccounts(userId, accounts);
+  const active = await activeAccounts(userId, accounts, toolkits);
 
-  return TOOLKITS.map((toolkit) => {
+  return toolkits.map((toolkit) => {
     const working = active.get(toolkit.slug) ?? [];
     // With nothing working, show how far the latest attempt got.
     const attempt = accounts
@@ -318,8 +464,10 @@ export async function listToolkitConnections(userId: string): Promise<ToolkitCon
       slug: toolkit.slug,
       name: toolkit.name,
       description: toolkit.description,
+      logo: toolkit.logo,
+      builtIn: toolkit.builtIn,
       access: toolkit.access,
-      currentAccess: resolveAccess(toolkit.slug, saved.get(toolkit.slug)).id,
+      currentAccess: resolveAccess(toolkit, saved.get(toolkit.slug)).id,
       accounts: working,
       status: working.length > 0 ? "ACTIVE" : attempt?.status,
     };
@@ -375,9 +523,11 @@ export type ComposioTools = {
  */
 export function filterToolsByAccess(tools: ToolSet, levels: Map<ToolkitSlug, AccessLevel>): ToolSet {
   const allFull = [...levels.values()].every((level) => !level.tools);
+  // Longest first, so a tool is matched to the most specific toolkit whose slug prefixes it.
+  const slugs = [...levels.keys()].sort((a, b) => b.length - a.length);
   return Object.fromEntries(
     Object.entries(tools).filter(([name]) => {
-      const slug = TOOLKITS.find((t) => name.toUpperCase().startsWith(`${t.slug}_`))?.slug;
+      const slug = slugs.find((s) => name.toUpperCase().startsWith(`${s}_`));
       if (!slug) return allFull;
       const level = levels.get(slug);
       if (!level) return false;
@@ -471,15 +621,16 @@ export async function withAccountChoice(
  */
 export async function loadComposioTools(userId: string): Promise<ComposioTools> {
   try {
-    const [{ items }, saved] = await Promise.all([
+    const [{ items }, saved, toolkits] = await Promise.all([
       composio().connectedAccounts.list({ userIds: [userId], statuses: ["ACTIVE"], limit: 100 }),
       savedAccess(userId),
+      getToolkits(),
     ]);
-    const accounts = await activeAccounts(userId, items, { onlyToTellApart: true });
+    const accounts = await activeAccounts(userId, items, toolkits, { onlyToTellApart: true });
     if (accounts.size === 0) return { tools: {}, notes: [] };
 
     const levels = new Map<ToolkitSlug, AccessLevel>(
-      [...accounts.keys()].map((slug) => [slug, resolveAccess(slug, saved.get(slug))]),
+      [...accounts.keys()].map((slug) => [slug, resolveAccess(findToolkit(toolkits, slug)!, saved.get(slug))]),
     );
 
     // Session i uses each toolkit's i-th account. Naming the accounts also matters with just one:
@@ -518,7 +669,7 @@ export async function loadComposioTools(userId: string): Promise<ComposioTools> 
     const notes = [...levels.values()].flatMap((level) => (level.agentNote ? [level.agentNote] : []));
     for (const [slug, list] of accounts) {
       if (list.length < 2) continue;
-      const name = TOOLKITS.find((t) => t.slug === slug)!.name;
+      const name = findToolkit(toolkits, slug)!.name;
       const labeled = list.map((account, i) => ({ email: account.email ?? `account ${i + 1}`, i }));
       for (const toolName of Object.keys(tools)) {
         if (!toolName.toUpperCase().startsWith(`${slug}_`)) continue;

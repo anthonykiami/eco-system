@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { asSchema, jsonSchema, type ToolSet } from "ai";
 import {
+  catalogToolkit,
+  classifyTools,
   disconnectToolkit,
+  findToolkit,
+  getToolkits,
   isAccessLevel,
-  isToolkitSlug,
   listToolkitConnections,
   loadComposioTools,
+  MAX_APP_TOOLS,
   resolveAccess,
   startToolkitConnection,
   TOOLKITS,
@@ -21,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   authCreate: vi.fn(),
   createSession: vi.fn(),
   listAccess: vi.fn(),
+  listCatalog: vi.fn(),
   redisGet: vi.fn(),
   redisSet: vi.fn(),
 }));
@@ -32,7 +37,10 @@ vi.mock("@composio/core", () => ({
     create = mocks.createSession;
   },
 }));
-vi.mock("@/lib/db/queries", () => ({ listIntegrationAccess: mocks.listAccess }));
+vi.mock("@/lib/db/queries", () => ({
+  listIntegrationAccess: mocks.listAccess,
+  listIntegrationCatalog: mocks.listCatalog,
+}));
 vi.mock("@composio/vercel", () => ({ VercelProvider: class {} }));
 vi.mock("@/lib/upstash", () => ({ redis: { get: mocks.redisGet, set: mocks.redisSet } }));
 
@@ -52,6 +60,7 @@ beforeEach(() => {
   mocks.authList.mockReset().mockResolvedValue({ items: [{ id: "ac_existing" }] });
   mocks.authCreate.mockReset().mockResolvedValue({ id: "ac_new" });
   mocks.listAccess.mockReset().mockResolvedValue([]);
+  mocks.listCatalog.mockReset().mockResolvedValue([]);
   mocks.redisGet.mockReset().mockResolvedValue(null);
   mocks.redisSet.mockReset().mockResolvedValue("OK");
   mocks.createSession.mockReset().mockResolvedValue({ tools: async () => toolsNamed(EVERY_GMAIL_TOOL) });
@@ -71,25 +80,83 @@ const toolsNamed = (names: string[]): ToolSet =>
   Object.fromEntries(names.map((n) => [n, { description: n, inputSchema: jsonSchema({ type: "object", properties: {} }) } as unknown as ToolSet[string]]));
 const savedGmail = (access: string) => mocks.listAccess.mockResolvedValue([{ toolkit: "GMAIL", access }]);
 
+const NOTION = {
+  slug: "NOTION",
+  name: "Notion",
+  description: "Docs",
+  logo: null,
+  fullTools: ["NOTION_SEARCH", "NOTION_FETCH_PAGE", "NOTION_CREATE_PAGE", "NOTION_ARCHIVE_PAGE"],
+  readTools: ["NOTION_SEARCH", "NOTION_FETCH_PAGE"],
+  safeTools: ["NOTION_SEARCH", "NOTION_FETCH_PAGE", "NOTION_CREATE_PAGE"],
+  addedAt: new Date(),
+};
+
 describe("toolkit catalog", () => {
-  it("accepts only known slugs", () => {
-    expect(isToolkitSlug("GMAIL")).toBe(true);
-    expect(isToolkitSlug("gmail")).toBe(false);
-    expect(isToolkitSlug("SLACK")).toBe(false);
+  it("is the built-in toolkits plus the apps the owner added", async () => {
+    mocks.listCatalog.mockResolvedValue([NOTION]);
+    const toolkits = await getToolkits();
+    expect(toolkits.map((t) => [t.slug, t.builtIn])).toEqual([
+      ["GMAIL", true],
+      ["GOOGLECALENDAR", true],
+      ["NOTION", false],
+    ]);
+    expect(findToolkit(toolkits, "notion")?.name).toBe("Notion");
+    expect(findToolkit(toolkits, "SLACK")).toBeUndefined();
+  });
+
+  it("still offers the built-in toolkits if the catalog can't be read", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.listCatalog.mockRejectedValue(new Error("db down"));
+    expect((await getToolkits()).map((t) => t.slug)).toEqual(["GMAIL", "GOOGLECALENDAR"]);
+  });
+
+  it("uses an app's important tools, sorted by Composio's hints, skipping deprecated ones", () => {
+    expect(
+      classifyTools([
+        { slug: "notion_search", tags: ["readOnlyHint", "important"] },
+        { slug: "NOTION_CREATE_PAGE", tags: ["createHint", "important"] },
+        { slug: "NOTION_ARCHIVE_PAGE", tags: ["destructiveHint", "important"] },
+        { slug: "NOTION_DELETE_BLOCK", tags: ["deleteHint", "important"] },
+        { slug: "NOTION_RARE_THING", tags: ["readOnlyHint"] },
+        { slug: "NOTION_OLD_SEARCH", tags: ["readOnlyHint", "important"], isDeprecated: true },
+      ]),
+    ).toEqual({
+      fullTools: ["NOTION_SEARCH", "NOTION_CREATE_PAGE", "NOTION_ARCHIVE_PAGE", "NOTION_DELETE_BLOCK"],
+      readTools: ["NOTION_SEARCH"],
+      safeTools: ["NOTION_SEARCH", "NOTION_CREATE_PAGE"],
+    });
+  });
+
+  it("caps an app that tags nothing important", () => {
+    const tools = Array.from({ length: 100 }, (_, i) => ({ slug: `APP_T${i}`, tags: ["readOnlyHint"] }));
+    expect(classifyTools(tools).fullTools).toHaveLength(MAX_APP_TOOLS);
+  });
+
+  it("gives an added app read, write and full levels, starting read-only", () => {
+    const toolkit = catalogToolkit(NOTION);
+    expect(toolkit.access.map((a) => [a.id, a.tools])).toEqual([
+      ["read", NOTION.readTools],
+      ["write", NOTION.safeTools],
+      ["full", NOTION.fullTools],
+    ]);
+    expect(resolveAccess(toolkit).id).toBe("read");
   });
 });
 
 describe("access levels", () => {
+  const gmail = { ...TOOLKITS[0], logo: null, builtIn: true };
+  const calendar = { ...TOOLKITS[1], logo: null, builtIn: true };
+
   it("falls back to the toolkit default for missing or retired levels", () => {
-    expect(resolveAccess("GMAIL").id).toBe("draft");
-    expect(resolveAccess("GMAIL", "retired-level").id).toBe("draft");
-    expect(resolveAccess("GMAIL", "full").id).toBe("full");
-    expect(resolveAccess("GOOGLECALENDAR").id).toBe("edit");
+    expect(resolveAccess(gmail).id).toBe("draft");
+    expect(resolveAccess(gmail, "retired-level").id).toBe("draft");
+    expect(resolveAccess(gmail, "full").id).toBe("full");
+    expect(resolveAccess(calendar).id).toBe("edit");
   });
 
   it("validates level ids per toolkit", () => {
-    expect(isAccessLevel("GMAIL", "draft")).toBe(true);
-    expect(isAccessLevel("GOOGLECALENDAR", "draft")).toBe(false);
+    expect(isAccessLevel(gmail, "draft")).toBe(true);
+    expect(isAccessLevel(calendar, "draft")).toBe(false);
   });
 
   it("no restricted level allows sending or deleting", () => {
@@ -103,6 +170,24 @@ describe("access levels", () => {
 });
 
 describe("loadComposioTools", () => {
+  it("gives an added app's tools at the user's level and tells the agent its limits", async () => {
+    mocks.listCatalog.mockResolvedValue([NOTION]);
+    mocks.list.mockResolvedValue({ items: [{ ...ACCOUNT, id: "ca_n", toolkit: { slug: "notion" } }] });
+    mocks.createSession.mockResolvedValue({
+      tools: async () => toolsNamed(["NOTION_SEARCH", "NOTION_CREATE_PAGE", "NOTION_ARCHIVE_PAGE"]),
+    });
+
+    const { tools, notes } = await loadComposioTools("user-1");
+
+    expect(Object.keys(tools)).toEqual(["NOTION_SEARCH"]);
+    expect(notes).toEqual([expect.stringMatching(/Notion is read-only/)]);
+    expect(mocks.createSession.mock.calls[0][1]).toMatchObject({
+      toolkits: ["notion"],
+      connectedAccounts: { notion: "ca_n" },
+      tools: { notion: { enable: NOTION.readTools } },
+    });
+  });
+
   it("defaults Gmail to read and draft: no sending, even if Composio returns send tools", async () => {
     const { tools, notes } = await loadComposioTools("user-1");
 

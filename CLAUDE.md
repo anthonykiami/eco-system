@@ -108,6 +108,7 @@ Never query user-owned tables outside lib/db/queries/. Every query must be scope
   - `getUserByTelegramChatId`: webhook resolves chat → user.
   - `listDueJobs`: heartbeat scan. It returns ids only.
   - `admin*` in `lib/db/queries/admin.ts`: call only after `requireAdmin()`.
+  - `listIntegrationCatalog` (`catalog.ts`): the apps the owner added for everyone to connect. It's shared config, not user data; only `adminAddIntegration` / `adminRemoveIntegration` change it.
 - `lib/db/queries/isolation.test.ts` proves two users can't see or modify each other's data. Extend it whenever you add a helper.
 - DB tests replace `@/lib/db` with PGlite using `vi.mock("@/lib/db", async () => (await import("@/test/db")).createTestDbModule())`.
 - Pages, route handlers and server actions must call `requireSession()`, `requireActiveUser()` or `requireAdmin()` from `lib/auth/session.ts`. `proxy.ts` is not a security boundary.

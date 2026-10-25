@@ -4,8 +4,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   disconnectToolkit,
+  findToolkit,
+  getToolkits,
   isAccessLevel,
-  isToolkitSlug,
   startToolkitConnection,
 } from "@/lib/agents/composio";
 import { requireActiveUser } from "@/lib/auth/session";
@@ -17,14 +18,14 @@ const SETTINGS_PATH = "/settings/integrations";
 /** Sends the user to the provider's consent screen; Composio returns them here afterwards. */
 export async function connectToolkit(formData: FormData) {
   const session = await requireActiveUser();
-  const slug = String(formData.get("slug") ?? "");
-  if (!isToolkitSlug(slug)) redirect(`${SETTINGS_PATH}?error=unknown`);
+  const toolkit = findToolkit(await getToolkits(), String(formData.get("slug") ?? ""));
+  if (!toolkit) redirect(`${SETTINGS_PATH}?error=unknown`);
 
   let redirectUrl: string;
   try {
     redirectUrl = await startToolkitConnection(
       session.user.id,
-      slug,
+      toolkit.slug,
       new URL(SETTINGS_PATH, env.APP_URL).toString(),
     );
   } catch (err) {
@@ -51,11 +52,11 @@ export async function removeToolkit(formData: FormData) {
 /** Saves how much the agent may do with one toolkit. Takes effect on the next agent run. */
 export async function setToolkitAccess(formData: FormData) {
   const session = await requireActiveUser();
-  const slug = String(formData.get("slug") ?? "");
+  const toolkit = findToolkit(await getToolkits(), String(formData.get("slug") ?? ""));
   const access = String(formData.get("access") ?? "");
-  if (!isToolkitSlug(slug) || !isAccessLevel(slug, access)) redirect(`${SETTINGS_PATH}?error=access`);
+  if (!toolkit || !isAccessLevel(toolkit, access)) redirect(`${SETTINGS_PATH}?error=access`);
 
-  await setIntegrationAccess(session.user.id, slug, access);
+  await setIntegrationAccess(session.user.id, toolkit.slug, access);
   revalidatePath(SETTINGS_PATH);
   redirect(`${SETTINGS_PATH}?saved=1`);
 }
