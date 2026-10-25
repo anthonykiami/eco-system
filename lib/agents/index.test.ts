@@ -7,7 +7,8 @@ import * as q from "@/lib/db/queries";
 import { eq } from "drizzle-orm";
 import { users } from "@/lib/db/schema";
 import { withAgentTrace } from "@/lib/tracing";
-import { BudgetExceededError, RateLimitError, runAgent } from "./index";
+import { APICallError } from "ai";
+import { BudgetExceededError, RateLimitError, runAgent, ServiceUnavailableError } from "./index";
 import { PLAN_LIMITS } from "./limits";
 
 vi.mock("@/lib/db", async () => (await import("@/test/db")).createTestDbModule());
@@ -274,6 +275,24 @@ describe("a run", () => {
     expect((await q.listMessages(userId, chatId, { limit: 5 })).at(-1)?.content).toBe("All done.");
     // Both streamed steps, plus the memory model's call.
     expect(await q.getUsage(userId, q.currentMonth())).toMatchObject({ inputTokens: 50, outputTokens: 19 });
+  });
+
+  it("an out-of-credit AI account becomes a clear error, not a crash", async () => {
+    const { userId } = await seedUser("no-credit");
+    mocks.agentGenerate.mockRejectedValue(
+      new APICallError({
+        message: "Your credit balance is too low to access the Anthropic API.",
+        url: "https://api.anthropic.com/v1/messages",
+        requestBodyValues: {},
+        statusCode: 400,
+        isRetryable: false,
+      }),
+    );
+
+    const err = await runAgent({ userId, message: "hi", channel: "telegram" }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ServiceUnavailableError);
+    expect((err as ServiceUnavailableError).userMessage).toMatch(/out of credit/);
   });
 
   it("scheduled runs start a new chat, marked as a task run, which web turns never continue", async () => {

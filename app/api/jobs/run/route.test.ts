@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BudgetExceededError, RateLimitError } from "@/lib/agents/errors";
+import { BudgetExceededError, RateLimitError, ServiceUnavailableError } from "@/lib/agents/errors";
 import * as q from "@/lib/db/queries";
 import { jobLockKey } from "@/lib/heartbeat/run-job";
 import { qstashRequest, seedUser, signQStash } from "@/lib/heartbeat/testing";
@@ -301,6 +301,17 @@ describe("POST /api/jobs/run: budget and rate limits", () => {
     expect(res2.status).toBe(200);
     expect(await res2.json()).toEqual({ status: "skipped", reason: "budget_exceeded", notified: false });
     expect(telegram).toHaveBeenCalledTimes(1);
+  });
+
+  it("an out-of-credit AI account skips the run instead of retrying, and says why once", async () => {
+    const { message } = await seedJob("nocredit@example.com", "tg-nocredit");
+    agents.runAgent.mockRejectedValueOnce(new ServiceUnavailableError("credit"));
+
+    const res = await POST(qstashRequest(PATH, message));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: "skipped", reason: "service_unavailable", notified: true });
+    expect(sentTexts()[0].text).toMatch(/out of credit/);
   });
 
   it("rate limited skips the run with 200 and notifies", async () => {

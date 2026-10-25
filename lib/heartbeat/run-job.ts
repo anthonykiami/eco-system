@@ -1,5 +1,5 @@
 import { runAgent } from "@/lib/agents";
-import { BudgetExceededError, RateLimitError, type AgentError } from "@/lib/agents/errors";
+import { BudgetExceededError, RateLimitError, ServiceUnavailableError, type AgentError } from "@/lib/agents/errors";
 import * as q from "@/lib/db/queries";
 import type { Agent } from "@/lib/db/schema";
 import { agentBotToken } from "@/lib/telegram/agent-bots";
@@ -17,7 +17,11 @@ export type RunJobResult =
   | { status: "reminded" }
   | { status: "locked" }
   | { status: "skipped"; reason: "not_found" | "disabled" | "already_ran" | "agent_paused" }
-  | { status: "skipped"; reason: "budget_exceeded" | "rate_limited"; notified: boolean };
+  | {
+      status: "skipped";
+      reason: "budget_exceeded" | "rate_limited" | "service_unavailable";
+      notified: boolean;
+    };
 
 // Delete the lock only if we still own it.
 const RELEASE_LOCK = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
@@ -69,11 +73,17 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
         channel: "scheduled",
       });
     } catch (err) {
-      if (err instanceof BudgetExceededError || err instanceof RateLimitError) {
+      // Retrying can't help with these, so the run is skipped and the user told (once a day).
+      if (err instanceof BudgetExceededError || err instanceof RateLimitError || err instanceof ServiceUnavailableError) {
         const notified = await notifyOncePerDay(userId, user?.telegramChatId ?? null, err);
         return {
           status: "skipped",
-          reason: err instanceof BudgetExceededError ? "budget_exceeded" : "rate_limited",
+          reason:
+            err instanceof BudgetExceededError
+              ? "budget_exceeded"
+              : err instanceof RateLimitError
+                ? "rate_limited"
+                : "service_unavailable",
           notified,
         };
       }

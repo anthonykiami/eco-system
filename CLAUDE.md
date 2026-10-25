@@ -96,6 +96,7 @@ Import it with `import { runAgent } from "@/lib/agents"`.
 - `AgentError` (abstract base): `code: string` and `userMessage: string`.
 - `RateLimitError`: `code = "RATE_LIMITED"`, optional `retryAfterSeconds`. Message: "You're sending messages too quickly…"
 - `BudgetExceededError`: `code = "BUDGET_EXCEEDED"`. Message: "You've reached your usage limit for this month…"
+- `ServiceUnavailableError`: `code = "SERVICE_UNAVAILABLE"`, `reason: "credit" | "auth"`. The AI provider refused for an owner-side reason (no credit, bad key). Message: "I can't reply right now: the AI account behind this assistant…". It's also flagged on the admin System card (`lib/agents/provider-health.ts`).
 - `isAgentError(err)` is a type guard.
 
 ## Data access rules

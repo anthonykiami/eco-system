@@ -1,3 +1,4 @@
+import { getProviderProblem } from "@/lib/agents/provider-health";
 import { env } from "@/lib/env";
 import { adminListUsers } from "@/lib/db/queries/admin";
 import { callTelegram } from "@/lib/telegram/api";
@@ -75,6 +76,23 @@ async function redisCheck(): Promise<Check> {
   }
 }
 
+async function aiCheck(): Promise<Check> {
+  const problem = await getProviderProblem();
+  if (!problem) return { name: "AI service", tone: "success", detail: "Anthropic is accepting requests." };
+  const since = formatAgo(new Date(problem.at));
+  return problem.reason === "credit"
+    ? {
+        name: "AI service",
+        tone: "danger",
+        detail: `Out of credit (last seen ${since}), so every agent is failing. Buy credits, ideally with auto-reload, at console.anthropic.com → Plans & Billing.`,
+      }
+    : {
+        name: "AI service",
+        tone: "danger",
+        detail: `Anthropic rejected the API key (last seen ${since}). Check ANTHROPIC_API_KEY in Vercel.`,
+      };
+}
+
 function voiceCheck(): Check {
   return env.GROQ_API_KEY
     ? { name: "Voice messages", tone: "success", detail: "Groq transcription is configured." }
@@ -83,7 +101,7 @@ function voiceCheck(): Check {
 
 export async function SystemHealth() {
   const [checks, users] = await Promise.all([
-    Promise.all([telegramCheck(), topicsCheck(), redisCheck(), Promise.resolve(voiceCheck())]),
+    Promise.all([aiCheck(), telegramCheck(), topicsCheck(), redisCheck(), Promise.resolve(voiceCheck())]),
     adminListUsers(),
   ]);
   const waitlist = users.filter((u) => u.status === "waitlist").length;

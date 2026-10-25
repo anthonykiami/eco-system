@@ -21,11 +21,12 @@ import { buildMemoryTools, rememberFacts } from "./memory";
 import { webTools } from "./models";
 import { runAgentTurn } from "./primary";
 import { buildScheduleTools } from "./schedule-tools";
+import { asServiceError, clearProviderProblem } from "./provider-health";
 import { buildDelegationTools } from "./specialized";
 import type { AgentChannel, RunAgent } from "./types";
 
 export type { AgentChannel, AgentImage, RunAgent, RunAgentInput, RunAgentResult } from "./types";
-export { AgentError, BudgetExceededError, RateLimitError, isAgentError } from "./errors";
+export { AgentError, BudgetExceededError, RateLimitError, ServiceUnavailableError, isAgentError } from "./errors";
 
 const HISTORY_LIMIT = 30;
 const EMPTY_REPLY = "Sorry, I wasn't able to finish that. Could you try rephrasing?";
@@ -95,9 +96,13 @@ export const runAgent: RunAgent = async ({
       await Promise.all([
         addMessage(userId, { chatId: chat.id, role: "assistant", content: text }),
         rememberFacts(ctx, { user: storedMessage(message, images.length), assistant: text }),
+        clearProviderProblem(),
       ]);
       return { text, chatId: chat.id };
     });
+  } catch (err) {
+    // No credit or a bad key: say so plainly, instead of a generic error, and flag it for the owner.
+    throw await asServiceError(err);
   } finally {
     // Record usage even when the run fails partway, so tokens already spent are billed.
     await recordUsage(ctx);
