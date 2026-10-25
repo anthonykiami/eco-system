@@ -1,7 +1,7 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { messages, type Chat, type Message, type MessageRole } from "@/lib/db/schema";
-import { getChat } from "./chats";
+import { getChat, listChats } from "./chats";
 import { NotFoundError } from "./errors";
 
 export type NewMessageInput = { chatId: string; role: MessageRole; content: string };
@@ -72,4 +72,40 @@ export async function listRecentConversations(
     [...latestByChat.values()].map(async (lastMessage) => ({ chat: await getChat(userId, lastMessage.chatId), lastMessage })),
   );
   return found.flatMap(({ chat, lastMessage }) => (chat ? [{ chat, lastMessage }] : []));
+}
+
+export type ConversationSummary = {
+  chat: Chat;
+  /** The first thing the user said, which is what the conversation is about. */
+  opening?: string;
+  /** When the last message was sent (or the chat was made, if it's empty). */
+  lastAt: Date;
+};
+
+/** One agent's conversations, most recently active first, each with how it started. */
+export async function listConversationSummaries(
+  userId: string,
+  agentId: string,
+  { limit = 40 }: { limit?: number } = {},
+): Promise<ConversationSummary[]> {
+  const chats = (await listChats(userId, { agentId })).slice(0, limit);
+  if (chats.length === 0) return [];
+  const ids = chats.map((c) => c.id);
+  const [openings, latest] = await Promise.all([
+    db
+      .selectDistinctOn([messages.chatId], { chatId: messages.chatId, content: messages.content })
+      .from(messages)
+      .where(and(eq(messages.userId, userId), inArray(messages.chatId, ids), eq(messages.role, "user")))
+      .orderBy(messages.chatId, asc(messages.createdAt)),
+    db
+      .selectDistinctOn([messages.chatId], { chatId: messages.chatId, createdAt: messages.createdAt })
+      .from(messages)
+      .where(and(eq(messages.userId, userId), inArray(messages.chatId, ids)))
+      .orderBy(messages.chatId, desc(messages.createdAt)),
+  ]);
+  const opening = new Map(openings.map((m) => [m.chatId, m.content]));
+  const last = new Map(latest.map((m) => [m.chatId, m.createdAt]));
+  return chats
+    .map((chat) => ({ chat, opening: opening.get(chat.id), lastAt: last.get(chat.id) ?? chat.createdAt }))
+    .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime());
 }

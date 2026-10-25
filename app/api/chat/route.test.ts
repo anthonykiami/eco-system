@@ -1,88 +1,112 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BudgetExceededError, RateLimitError } from "@/lib/agents/errors";
-import { NotFoundError } from "@/lib/db/queries";
-import { POST } from "./route";
+import { BudgetExceededError, ServiceUnavailableError } from "@/lib/agents/errors";
+import { db } from "@/lib/db";
+import * as q from "@/lib/db/queries";
+import { users } from "@/lib/db/schema";
+import { POST, type ChatEvent } from "./route";
 
+vi.mock("@/lib/db", async () => (await import("@/test/db")).createTestDbModule());
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), runAgent: vi.fn() }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/agents", () => ({ runAgent: mocks.runAgent }));
 
-const ACTIVE = { user: { id: "user-1", status: "active" } };
+async function seedUser(email: string) {
+  const [user] = await db.insert(users).values({ email }).returning();
+  const primary = await q.ensurePrimaryAgent(user.id);
+  mocks.auth.mockResolvedValue({ user: { id: user.id, status: "active" } });
+  return { userId: user.id, primary };
+}
 
 const post = (body: unknown) =>
-  POST(
-    new Request("https://example.com/api/chat", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
+  POST(new Request("https://example.com/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+
+/** Reads the whole NDJSON stream. */
+async function events(res: Response): Promise<ChatEvent[]> {
+  const text = await res.text();
+  return text.split("\n").filter(Boolean).map((line) => JSON.parse(line) as ChatEvent);
+}
 
 beforeEach(() => {
-  mocks.auth.mockReset().mockResolvedValue(ACTIVE);
-  mocks.runAgent.mockReset().mockResolvedValue({ text: "hello back", chatId: "chat-1" });
+  mocks.runAgent.mockReset().mockImplementation(async ({ chatId }) => ({ text: "hello back", chatId }));
 });
 
 describe("POST /api/chat", () => {
-  it("runs the agent on the web channel and returns the reply", async () => {
-    const res = await post({ message: "hi", chatId: "chat-1" });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ text: "hello back", chatId: "chat-1" });
-    expect(mocks.runAgent).toHaveBeenCalledWith({
-      userId: "user-1",
-      chatId: "chat-1",
-      message: "hi",
-      channel: "web",
+  it("starts a new conversation with the chosen agent and streams the reply", async () => {
+    const { userId } = await seedUser("stream@example.com");
+    const coach = await q.createAgent(userId, { name: "Coach", soul: "You coach." });
+    mocks.runAgent.mockImplementation(async ({ chatId, onPartialText, onDelegate }) => {
+      onPartialText("hel");
+      onDelegate({ id: "x", name: "Researcher" });
+      return { text: "hello back", chatId };
     });
+
+    const res = await post({ message: "hi", agentId: coach.id });
+
+    expect(res.headers.get("content-type")).toBe("application/x-ndjson");
+    const [first, ...rest] = await events(res);
+    expect(first.type).toBe("chat");
+    const chatId = (first as { chatId: string }).chatId;
+    expect(await q.getChat(userId, chatId)).toMatchObject({ agentId: coach.id, channel: "web" });
+    expect(rest).toEqual([
+      { type: "partial", text: "hel" },
+      { type: "delegate", name: "Researcher" },
+      { type: "done", text: "hello back" },
+    ]);
+    expect(mocks.runAgent).toHaveBeenCalledWith(expect.objectContaining({ userId, chatId, message: "hi", channel: "web" }));
   });
 
-  it("passes no chatId when starting fresh", async () => {
-    await post({ message: "hi" });
-    expect(mocks.runAgent).toHaveBeenCalledWith(expect.objectContaining({ chatId: undefined }));
+  it("continues a conversation, and sends photos to the agent as images", async () => {
+    const { userId, primary } = await seedUser("photos-web@example.com");
+    const chat = await q.createChat(userId, { agentId: primary.id, channel: "telegram" });
+
+    await events(await post({ message: "", chatId: chat.id, images: [{ data: Buffer.from("img").toString("base64"), mediaType: "image/jpeg" }] }));
+
+    const input = mocks.runAgent.mock.calls[0][0];
+    expect(input.chatId).toBe(chat.id);
+    expect(input.images).toEqual([{ data: Buffer.from("img"), mediaType: "image/jpeg" }]);
   });
 
-  it("rejects signed-out callers", async () => {
+  it("offers tasks the agent scheduled, and reports agent errors as messages", async () => {
+    const { userId, primary } = await seedUser("tasks-web@example.com");
+    const job = await q.createJob(userId, { agentId: primary.id, cronExpression: "0 9 * * *", prompt: "Check inbox", enabled: false });
+    mocks.runAgent.mockImplementationOnce(async ({ chatId, onTaskScheduled }) => {
+      onTaskScheduled({ id: job.id });
+      return { text: "Set.", chatId };
+    });
+
+    expect(await events(await post({ message: "every day at 9 check my inbox" }))).toContainEqual({
+      type: "task",
+      id: job.id,
+      title: "Check inbox",
+      when: "Every day at 09:00",
+    });
+
+    mocks.runAgent.mockRejectedValueOnce(new BudgetExceededError());
+    expect((await events(await post({ message: "hi" }))).at(-1)).toEqual({
+      type: "error",
+      message: new BudgetExceededError().userMessage,
+    });
+    mocks.runAgent.mockRejectedValueOnce(new ServiceUnavailableError("credit"));
+    expect((await events(await post({ message: "hi" }))).at(-1)).toMatchObject({ message: expect.stringMatching(/out of credit/) });
+  });
+
+  it("can't start a conversation with someone else's agent", async () => {
+    const other = await seedUser("other-web@example.com");
+    const coach = await q.createAgent(other.userId, { name: "Coach", soul: "You coach." });
+    await seedUser("me-web@example.com");
+
+    expect((await post({ message: "hi", agentId: coach.id })).status).toBe(404);
+    expect(mocks.runAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects signed-out and waitlisted callers, and empty messages", async () => {
     mocks.auth.mockResolvedValue(null);
     expect((await post({ message: "hi" })).status).toBe(401);
-    expect(mocks.runAgent).not.toHaveBeenCalled();
-  });
-
-  it("rejects waitlisted users", async () => {
-    mocks.auth.mockResolvedValue({ user: { id: "user-1", status: "waitlist" } });
+    mocks.auth.mockResolvedValue({ user: { id: "u", status: "waitlist" } });
     expect((await post({ message: "hi" })).status).toBe(403);
-    expect(mocks.runAgent).not.toHaveBeenCalled();
-  });
-
-  it("rejects empty and oversized messages", async () => {
+    await seedUser("empty-web@example.com");
     expect((await post({ message: "   " })).status).toBe(400);
     expect((await post({ message: "x".repeat(8001) })).status).toBe(400);
-    expect((await post({})).status).toBe(400);
     expect(mocks.runAgent).not.toHaveBeenCalled();
-  });
-
-  it("maps rate limits to 429 with the user-facing message", async () => {
-    const err = new RateLimitError(30);
-    mocks.runAgent.mockRejectedValue(err);
-    const res = await post({ message: "hi" });
-    expect(res.status).toBe(429);
-    expect(await res.json()).toEqual({ error: err.userMessage });
-  });
-
-  it("maps a budget cap to 402", async () => {
-    mocks.runAgent.mockRejectedValue(new BudgetExceededError());
-    expect((await post({ message: "hi" })).status).toBe(402);
-  });
-
-  it("maps a missing chat to 404", async () => {
-    mocks.runAgent.mockRejectedValue(new NotFoundError("Chat", "gone"));
-    expect((await post({ message: "hi", chatId: "gone" })).status).toBe(404);
-  });
-
-  it("hides unexpected errors behind a generic 500", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.runAgent.mockRejectedValue(new Error("model exploded"));
-    const res = await post({ message: "hi" });
-    expect(res.status).toBe(500);
-    expect(JSON.stringify(await res.json())).not.toContain("exploded");
   });
 });

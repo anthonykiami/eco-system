@@ -1,12 +1,20 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requireActiveUser } from "@/lib/auth/session";
-import { createChat, ensurePrimaryAgent } from "@/lib/db/queries";
+import { deleteUserJob, resumeUserJob } from "@/lib/heartbeat";
 
-/** Starts a fresh web conversation and returns its id. */
-export async function startNewChat(): Promise<string> {
+/** Turns on a task an agent created in chat (they start switched off). */
+export async function turnOnTask(jobId: string): Promise<boolean> {
   const session = await requireActiveUser();
-  const agent = await ensurePrimaryAgent(session.user.id);
-  const chat = await createChat(session.user.id, { agentId: agent.id, channel: "web" });
-  return chat.id;
+  const job = await resumeUserJob(session.user.id, jobId);
+  revalidatePath("/settings/schedules");
+  return Boolean(job?.enabled);
+}
+
+/** Throws away a task an agent created in chat. */
+export async function discardTask(jobId: string): Promise<void> {
+  const session = await requireActiveUser();
+  await deleteUserJob(session.user.id, jobId);
+  revalidatePath("/settings/schedules");
 }

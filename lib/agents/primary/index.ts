@@ -8,12 +8,11 @@ import type { AgentImage } from "../types";
 import { agentModel } from "../models";
 
 /**
- * The web chat route waits for the reply within 60s. Telegram turns run in the background
- * (after()) and the scheduled-job worker in its own request, both allowed 300s, so they can
- * research far more (a news brief runs many searches). Leave headroom for saving afterwards.
+ * Every route that runs a turn allows 300s: the web chat streams its reply, Telegram runs it in
+ * after(), and scheduled runs have their own worker. That leaves room to research (a news brief
+ * runs many searches) plus headroom for saving afterwards.
  */
-const WEB_TURN_TIMEOUT_MS = 45_000;
-const BACKGROUND_TURN_TIMEOUT_MS = 240_000;
+const TURN_TIMEOUT_MS = 240_000;
 
 /** The model has no clock, so the current moment in the user's timezone is stated explicitly. */
 export function buildSituation(timezone: string, now: Date = new Date()): string {
@@ -101,7 +100,7 @@ export async function runAgentTurn({
     tools,
     stopWhen: stepCountIs(PLAN_LIMITS[ctx.plan].maxSteps),
     // Delegations receive this call's abortSignal, so they share the same budget.
-    timeout: { totalMs: ctx.channel === "web" ? WEB_TURN_TIMEOUT_MS : BACKGROUND_TURN_TIMEOUT_MS },
+    timeout: { totalMs: TURN_TIMEOUT_MS },
     ...telemetryFor(agent.role === "primary" ? "primary-agent" : `agent:${agent.name}`, ctx),
   };
 
