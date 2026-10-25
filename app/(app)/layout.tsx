@@ -1,8 +1,9 @@
 import { AppNav } from "@/components/app-nav";
+import { LogoMark, Wordmark } from "@/components/logo";
 import { SignOutButton } from "@/components/sign-out-button";
 import { requireActiveUser } from "@/lib/auth/session";
 
-/** The signed-in app: a sidebar on wide screens, a top bar on phones. */
+/** The signed-in app: a floating glass sidebar on wide screens, a top bar on phones. */
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const session = await requireActiveUser();
   const { name, email, image, isAdmin } = session.user;
@@ -10,35 +11,41 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
 
   return (
     <div className="flex min-h-dvh flex-1">
-      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-6 border-r border-line bg-surface px-3 py-5 md:flex">
-        <div className="flex items-center gap-2 px-3">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-sm font-bold text-accent-foreground">
-            A
-          </span>
-          <span className="font-semibold tracking-tight">Assistant</span>
-        </div>
-        <AppNav isAdmin={Boolean(isAdmin)} layout="sidebar" />
-        <div className="flex items-center gap-3 border-t border-line px-3 pt-4">
-          {image ? (
-            // eslint-disable-next-line @next/next/no-img-element -- Google avatar, tiny and external
-            <img src={image} alt="" className="h-8 w-8 rounded-full" referrerPolicy="no-referrer" />
-          ) : (
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted text-sm">
-              {label.slice(0, 1).toUpperCase()}
-            </span>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{label}</p>
-            <p className="text-xs text-muted">{isAdmin ? "Owner · admin" : "Member"}</p>
+      <div className="sticky top-0 hidden h-dvh w-64 shrink-0 p-3 md:block">
+        <aside className="glass flex h-full flex-col gap-7 rounded-3xl border border-line px-3 py-6">
+          <div className="flex flex-col items-center gap-3 px-3">
+            <LogoMark className="h-14 w-14" />
+            <Wordmark className="text-sm" />
           </div>
-          <SignOutButton />
-        </div>
-      </aside>
+          <AppNav isAdmin={Boolean(isAdmin)} layout="sidebar" />
+          <div className="flex items-center gap-3 border-t border-line px-2 pt-4">
+            <span className="relative">
+              {image ? (
+                // eslint-disable-next-line @next/next/no-img-element -- Google avatar, tiny and external
+                <img src={image} alt="" className="h-9 w-9 rounded-full" referrerPolicy="no-referrer" />
+              ) : (
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent">
+                  {label.slice(0, 1).toUpperCase()}
+                </span>
+              )}
+              <span className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#0b1511] bg-accent" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{label}</p>
+              <p className="text-xs text-muted">{isAdmin ? "Owner · admin" : "Member"}</p>
+            </div>
+            <SignOutButton />
+          </div>
+        </aside>
+      </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-10 border-b border-line bg-surface md:hidden">
+        <header className="glass sticky top-0 z-10 border-b border-line md:hidden">
           <div className="flex items-center justify-between px-4 py-3">
-            <span className="font-semibold tracking-tight">Assistant</span>
+            <span className="flex items-center gap-2">
+              <LogoMark className="h-7 w-7" />
+              <Wordmark className="text-xs" />
+            </span>
             <SignOutButton />
           </div>
           <AppNav isAdmin={Boolean(isAdmin)} layout="bar" />

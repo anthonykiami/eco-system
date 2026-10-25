@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth, signIn } from "@/auth";
+import { LogoMark, Wordmark } from "@/components/logo";
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const session = await auth();
@@ -14,13 +15,14 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
 
   return (
     <main className="flex flex-1 items-center justify-center p-8">
-      <div className="flex w-full max-w-sm flex-col items-center gap-6 rounded-2xl border border-line bg-surface p-8 shadow-sm">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent text-lg font-bold text-accent-foreground">
-          A
-        </span>
-        <div className="text-center">
-          <h1 className="text-xl font-semibold">Sign in to Assistant</h1>
-          <p className="mt-1 text-sm text-muted">Your agents, in Telegram and on the web.</p>
+      <div className="glass flex w-full max-w-sm flex-col items-center gap-6 rounded-3xl border border-line p-10">
+        <LogoMark className="h-16 w-16" />
+        <div className="flex flex-col items-center gap-2 text-center">
+          <h1 className="text-lg">
+            <Wordmark />
+          </h1>
+          <p className="eyebrow">Intelligence in balance</p>
+          <p className="mt-2 text-sm text-muted">Your AI agents, working together in Telegram and on the web.</p>
         </div>
         <form
           action={async () => {
@@ -31,7 +33,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
         >
           <button
             type="submit"
-            className="w-full rounded-lg bg-accent px-4 py-2.5 font-medium text-accent-foreground transition hover:opacity-90"
+            className="w-full rounded-full bg-accent px-4 py-2.5 font-medium text-accent-foreground shadow-[0_0_22px_-6px_rgba(94,230,168,0.7)] transition hover:brightness-110"
           >
             Continue with Google
           </button>

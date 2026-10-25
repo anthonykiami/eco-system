@@ -15,7 +15,7 @@ export function PageHeader({
   return (
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
         {description && <p className="mt-1 max-w-2xl text-sm text-muted">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
@@ -35,10 +35,10 @@ export function Card({
   className?: string;
 }) {
   return (
-    <section className={`flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5 ${className}`}>
+    <section className={`glass flex flex-col gap-4 rounded-3xl border border-line p-5 ${className}`}>
       {(title || action) && (
         <div className="flex items-center justify-between gap-3">
-          {title && <h2 className="text-sm font-semibold">{title}</h2>}
+          {title && <h2 className="text-[15px] font-semibold">{title}</h2>}
           {action && <div className="text-sm">{action}</div>}
         </div>
       )}
@@ -48,17 +48,19 @@ export function Card({
 }
 
 const BUTTON = {
-  primary: "bg-accent text-accent-foreground hover:opacity-90",
-  secondary: "border border-line bg-surface hover:bg-surface-muted",
+  primary: "bg-accent text-accent-foreground shadow-[0_0_22px_-6px_rgba(94,230,168,0.7)] hover:brightness-110",
+  secondary: "border border-line bg-surface-muted hover:bg-white/10",
   ghost: "text-muted hover:bg-surface-muted hover:text-foreground",
-  danger: "border border-line bg-surface text-danger hover:bg-danger-soft",
+  danger: "border border-line bg-surface-muted text-danger hover:bg-danger-soft",
+  /** An outlined pill that glows, like the hero's "Chat with ECO-SYSTEM". */
+  glow: "border border-accent/50 bg-accent/10 text-foreground shadow-[0_0_24px_-8px_rgba(94,230,168,0.8)] hover:bg-accent/20",
 } as const;
 
 export type ButtonVariant = keyof typeof BUTTON;
 
 export const buttonClass = (variant: ButtonVariant = "secondary", size: "sm" | "md" = "md") =>
-  `inline-flex items-center justify-center gap-2 rounded-lg font-medium transition disabled:opacity-50 ${
-    size === "sm" ? "px-2.5 py-1 text-xs" : "px-3.5 py-2 text-sm"
+  `inline-flex items-center justify-center gap-2 rounded-full font-medium transition disabled:opacity-50 ${
+    size === "sm" ? "px-3 py-1 text-xs" : "px-4 py-2 text-sm"
   } ${BUTTON[variant]}`;
 
 export function Button({
@@ -127,18 +129,18 @@ export function Meter({ value, label }: { value: number; label: string }) {
 }
 
 export function EmptyState({ children }: { children: ReactNode }) {
-  return <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-sm text-muted">{children}</p>;
+  return <p className="rounded-2xl border border-dashed border-line px-4 py-6 text-center text-sm text-muted">{children}</p>;
 }
 
 export const inputClass =
-  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none transition focus:border-accent";
+  "w-full rounded-xl border border-line bg-black/25 px-3 py-2 text-sm outline-none transition placeholder:text-muted/70 focus:border-accent/60 focus:shadow-[0_0_0_3px_rgba(94,230,168,0.12)]";
 
 /** Success or error notes shown after a form redirects back. */
 export function Notice({ tone, children }: { tone: "success" | "danger"; children: ReactNode }) {
   return (
     <p
       role={tone === "danger" ? "alert" : "status"}
-      className={`rounded-lg px-3 py-2 text-sm ${tone === "danger" ? "bg-danger-soft text-danger" : "bg-success-soft text-success"}`}
+      className={`rounded-xl px-3 py-2 text-sm ${tone === "danger" ? "bg-danger-soft text-danger" : "bg-success-soft text-success"}`}
     >
       {children}
     </p>

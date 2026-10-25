@@ -120,7 +120,7 @@ export function ChatWorkspace({
 
   return (
     <div className="flex h-[calc(100dvh-7rem)] min-h-0 md:h-dvh">
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-surface md:flex">{sidebar}</aside>
+      <aside className="glass hidden w-64 shrink-0 flex-col border-r border-line md:flex">{sidebar}</aside>
       <ChatPane
         agent={agent}
         agents={agents}
@@ -295,7 +295,7 @@ function ChatPane({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3 sm:px-6">
+      <header className="glass flex items-center gap-3 border-b border-line px-4 py-3 sm:px-6">
         <button
           type="button"
           onClick={() => setShowList((v) => !v)}
@@ -422,7 +422,7 @@ function ChatPane({
       </div>
 
       {readOnly ? (
-        <div className="border-t border-line bg-surface px-4 py-4 text-center text-sm text-muted">
+        <div className="glass border-t border-line px-4 py-4 text-center text-sm text-muted">
           This is a scheduled task&apos;s run, kept for reference.{" "}
           <Link href={url(agent.id, "new")} className="text-accent underline">
             Start a new chat
@@ -430,7 +430,7 @@ function ChatPane({
           to follow up.
         </div>
       ) : (
-        <div className="border-t border-line bg-surface px-4 py-3">
+        <div className="glass border-t border-line px-4 py-3">
           <form
             onSubmit={(e) => {
               e.preventDefault();

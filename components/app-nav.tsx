@@ -7,13 +7,13 @@ import type { ReactNode } from "react";
 type Item = { href: string; label: string; icon: ReactNode };
 
 const icon = (path: string) => (
-  <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] shrink-0" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d={path} />
   </svg>
 );
 
 export const MAIN_NAV: Item[] = [
-  { href: "/", label: "Dashboard", icon: icon("M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-4H4v4Zm10-13h6V4h-6v3Z") },
+  { href: "/", label: "Home", icon: icon("M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-4H4v4Zm10-13h6V4h-6v3Z") },
   { href: "/chat", label: "Chat", icon: icon("M4 5h16v11H8l-4 4V5Z") },
   { href: "/agents", label: "Agents", icon: icon("M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0") },
   { href: "/settings/schedules", label: "Tasks", icon: icon("M8 3v4m8-4v4M4 9h16M5 5h14v15H5V5Zm4 9 2 2 4-4") },
@@ -45,8 +45,10 @@ export function AppNav({ isAdmin, layout }: { isAdmin: boolean; layout: "sidebar
         key={item.href}
         href={item.href}
         aria-current={current ? "page" : undefined}
-        className={`flex items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm transition ${
-          current ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-surface-muted hover:text-foreground"
+        className={`flex items-center gap-3 whitespace-nowrap rounded-2xl px-3.5 py-2.5 text-sm transition ${
+          current
+            ? "glow bg-accent-soft font-medium text-foreground"
+            : "text-muted hover:bg-surface-muted hover:text-foreground"
         }`}
       >
         {item.icon}
@@ -69,9 +71,9 @@ export function AppNav({ isAdmin, layout }: { isAdmin: boolean; layout: "sidebar
       <div className="flex flex-col gap-0.5">{MAIN_NAV.map(link)}</div>
       {isAdmin && (
         <div className="flex flex-col gap-0.5">
-          <p className="flex items-center gap-2 px-3 pb-1 text-xs font-medium uppercase tracking-wide text-muted">
+          <p className="eyebrow flex items-center gap-2 px-3.5 pb-1.5">
             Admin
-            <span className="rounded-full bg-warning-soft px-1.5 py-px text-[10px] normal-case tracking-normal text-warning">
+            <span className="rounded-full bg-warning-soft px-1.5 py-px text-[10px] tracking-normal normal-case text-warning">
               owner only
             </span>
           </p>

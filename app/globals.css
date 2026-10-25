@@ -4,42 +4,31 @@
  * Design tokens. Pages use the Tailwind names (bg-surface, text-muted, border-line, bg-accent…),
  * so light and dark mode only change here.
  */
+/*
+ * ECO-SYSTEM theme: always dark, deep green-black with frosted-glass panels and a mint accent.
+ * Surfaces are translucent, so panels sit over the backdrop (see body) with a blur.
+ */
 :root {
-  --background: #f7f7f8;
-  --foreground: #18181b;
-  --surface: #ffffff;
-  --surface-muted: #f1f1f3;
-  --line: #e4e4e7;
-  --muted: #71717a;
-  --accent: #5b5bd6;
-  --accent-soft: #ededfc;
-  --accent-foreground: #ffffff;
-  --success: #15803d;
-  --success-soft: #e8f6ec;
-  --warning: #b45309;
-  --warning-soft: #fdf3e2;
-  --danger: #dc2626;
-  --danger-soft: #fdecec;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0b0b0d;
-    --foreground: #ededef;
-    --surface: #141417;
-    --surface-muted: #1c1c20;
-    --line: #27272c;
-    --muted: #9b9ba3;
-    --accent: #8b8bf5;
-    --accent-soft: #23234a;
-    --accent-foreground: #0b0b0d;
-    --success: #4ade80;
-    --success-soft: #12301d;
-    --warning: #fbbf24;
-    --warning-soft: #33270d;
-    --danger: #f87171;
-    --danger-soft: #3a1515;
-  }
+  color-scheme: dark;
+  --background: #040907;
+  --foreground: #e7f0ea;
+  --surface: rgba(14, 24, 20, 0.62);
+  --surface-muted: rgba(255, 255, 255, 0.05);
+  --line: rgba(255, 255, 255, 0.09);
+  --muted: #8fa59a;
+  --accent: #5ee6a8;
+  --accent-soft: rgba(94, 230, 168, 0.12);
+  --accent-foreground: #03130b;
+  --success: #5ee6a8;
+  --success-soft: rgba(94, 230, 168, 0.12);
+  --warning: #f5c35b;
+  --warning-soft: rgba(245, 195, 91, 0.13);
+  --danger: #f78a8a;
+  --danger-soft: rgba(247, 138, 138, 0.13);
+  /* Agent colors, as in the orchestrator. */
+  --agent-blue: #6aa8ff;
+  --agent-teal: #4fd8e8;
+  --agent-violet: #b18cff;
 }
 
 @theme inline {
@@ -58,14 +47,51 @@
   --color-warning-soft: var(--warning-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
-  --font-sans: var(--font-geist-sans);
+  --color-agent-blue: var(--agent-blue);
+  --color-agent-teal: var(--agent-teal);
+  --color-agent-violet: var(--agent-violet);
+  --font-sans: var(--font-sans-face);
   --font-mono: var(--font-geist-mono);
 }
 
 body {
-  background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+  /* Dusk over a jungle valley: green glows low, a cool light high, darkness at the edges. */
+  background:
+    radial-gradient(1200px 600px at 70% -10%, rgba(120, 190, 170, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 15% 110%, rgba(40, 140, 80, 0.22), transparent 60%),
+    radial-gradient(700px 420px at 90% 85%, rgba(30, 110, 90, 0.18), transparent 60%),
+    radial-gradient(600px 300px at 45% 40%, rgba(70, 160, 110, 0.07), transparent 70%),
+    linear-gradient(180deg, #06100c 0%, #040907 55%, #030605 100%);
+  background-attachment: fixed;
+  background-color: var(--background);
+}
+
+/* Frosted glass, for panels over the backdrop. */
+.glass {
+  background: var(--surface);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 10px 40px -20px rgba(0, 0, 0, 0.8);
+}
+
+/* A soft mint glow for what's active or primary. */
+.glow {
+  box-shadow:
+    0 0 0 1px rgba(94, 230, 168, 0.35),
+    0 0 24px -4px rgba(94, 230, 168, 0.45);
+}
+
+/* Small wide-spaced capitals, e.g. "INTELLIGENCE IN BALANCE". */
+.eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 /* Agent replies rendered from Markdown (components/markdown.tsx). */
