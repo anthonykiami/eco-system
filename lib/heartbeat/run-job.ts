@@ -16,7 +16,7 @@ export type RunJobResult =
   | { status: "ran"; chatId: string }
   | { status: "reminded" }
   | { status: "locked" }
-  | { status: "skipped"; reason: "not_found" | "disabled" | "already_ran" }
+  | { status: "skipped"; reason: "not_found" | "disabled" | "already_ran" | "agent_paused" }
   | { status: "skipped"; reason: "budget_exceeded" | "rate_limited"; notified: boolean };
 
 // Delete the lock only if we still own it.
@@ -43,15 +43,19 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
       return { status: "skipped", reason: "already_ran" };
     }
 
+    // Queued just before its agent was paused: a one-off goes back to waiting for the resume.
+    const agent = await q.getAgent(userId, job.agentId);
+    if (agent?.tasksPaused) {
+      if (job.kind !== "recurring") await q.updateJob(userId, jobId, { nextRunAt: new Date(scheduledFor) });
+      return { status: "skipped", reason: "agent_paused" };
+    }
+
     const user = await q.getUser(userId);
 
     // A reminder is the user's own words sent back at the set time; no agent runs.
     if (job.kind === "reminder") {
       await q.markJobRun(userId, jobId, { lastRunAt: new Date() });
-      if (user?.telegramChatId) {
-        const agent = await q.getAgent(userId, job.agentId);
-        await deliver(userId, jobId, user.telegramChatId, agent, `⏰ ${job.prompt}`);
-      }
+      if (user?.telegramChatId) await deliver(userId, jobId, user.telegramChatId, agent, `⏰ ${job.prompt}`);
       await q.deleteJob(userId, jobId);
       return { status: "reminded" };
     }
@@ -78,10 +82,7 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
 
     // Record the run before delivery so a Telegram failure never triggers a re-run.
     await q.markJobRun(userId, jobId, { lastRunAt: new Date(), nextRunAt: job.nextRunAt });
-    if (user?.telegramChatId) {
-      const agent = await q.getAgent(userId, job.agentId);
-      await deliver(userId, jobId, user.telegramChatId, agent, result.text);
-    }
+    if (user?.telegramChatId) await deliver(userId, jobId, user.telegramChatId, agent, result.text);
     if (job.kind === "once") await q.deleteJob(userId, jobId);
     return { status: "ran", chatId: result.chatId };
   } finally {

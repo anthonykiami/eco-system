@@ -185,6 +185,7 @@ export const agentCard = (agent: Agent) =>
   [
     `${name(agent)} ${handle(agent)}${agent.role === "primary" ? " · main agent" : ""}`,
     agent.description ? `\n${escapeHtml(agent.description)}` : "",
+    agent.tasksPaused ? "\n⏸ Its scheduled tasks are paused." : "",
     agent.telegramBotUsername
       ? `\nIts own chat: @${agent.telegramBotUsername}`
       : agent.role === "primary"

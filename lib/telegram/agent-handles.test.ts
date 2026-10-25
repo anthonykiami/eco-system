@@ -12,6 +12,7 @@ const agent = (name: string, role: Agent["role"] = "specialized"): Agent => ({
   telegramBotId: null,
   telegramBotUsername: null,
   telegramBotToken: null,
+  tasksPaused: false,
   description: null,
   soul: "",
   createdAt: new Date(),

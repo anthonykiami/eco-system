@@ -8,7 +8,14 @@ export type NewAgentInput = Pick<Agent, "name" | "soul"> &
 export type AgentPatch = Partial<
   Pick<
     Agent,
-    "name" | "description" | "soul" | "telegramTopicId" | "telegramBotId" | "telegramBotUsername" | "telegramBotToken"
+    | "name"
+    | "description"
+    | "soul"
+    | "telegramTopicId"
+    | "telegramBotId"
+    | "telegramBotUsername"
+    | "telegramBotToken"
+    | "tasksPaused"
   >
 >;
 

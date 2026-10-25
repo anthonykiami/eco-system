@@ -44,8 +44,9 @@ function taskStatus(job: ScheduledJob, timezone: string): string {
 }
 
 /** "Weekdays at 07:30 · next Mon 7:30 AM", or for a one-off just when it happens. */
-function scheduleLine(job: ScheduledJob, timezone: string): string {
+function scheduleLine(job: ScheduledJob, timezone: string, agentPaused = false): string {
   const when = describeJob(job, timezone);
+  if (agentPaused && job.enabled) return `${when} · paused with its agent`;
   if (job.kind !== "recurring") return job.enabled ? when : `${when} · paused`;
   return `${when} · ${taskStatus(job, timezone)}`;
 }
@@ -53,7 +54,8 @@ function scheduleLine(job: ScheduledJob, timezone: string): string {
 // ─── Views ──────────────────────────────────────────────────────────────────
 
 async function listView(c: BotContext): Promise<{ html: string; keyboard: InlineKeyboard }> {
-  const jobs = await listUserJobs(c.user.id);
+  const [jobs, agents] = await Promise.all([listUserJobs(c.user.id), loadAgents(c.user.id)]);
+  const paused = new Set(agents.filter((a) => a.tasksPaused).map((a) => a.id));
   const addRow = [
     { text: "➕ New task", callback_data: "nt" },
     { text: "☀️ Briefing", callback_data: "nb" },
@@ -62,7 +64,7 @@ async function listView(c: BotContext): Promise<{ html: string; keyboard: Inline
 
   const lines = jobs.map(
     (job, i) =>
-      `${i + 1}. <b>${escapeHtml(taskTitle(job))}</b>\n    ${scheduleLine(job, c.user.timezone)}`,
+      `${i + 1}. <b>${escapeHtml(taskTitle(job))}</b>\n    ${scheduleLine(job, c.user.timezone, paused.has(job.agentId))}`,
   );
   return {
     html: ["<b>Scheduled tasks</b>", "", ...lines, "", "Tap a task to pause, run or delete it."].join("\n"),
@@ -79,7 +81,7 @@ function cardView(c: BotContext, job: ScheduledJob, agents: Agent[]): { html: st
   const agent = agents.find((a) => a.id === job.agentId);
   const lines = [
     `<b>${escapeHtml(taskTitle(job))}</b>`,
-    scheduleLine(job, c.user.timezone),
+    scheduleLine(job, c.user.timezone, Boolean(agent?.tasksPaused)),
   ];
   if (agents.length > 1 && agent) lines.push(`Done by <b>${escapeHtml(agent.name)}</b>`);
   if (!isBriefing(job)) lines.push("", escapeHtml(job.prompt));

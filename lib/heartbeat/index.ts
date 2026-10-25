@@ -8,4 +8,6 @@ export {
   runUserJobNow,
   rescheduleUserJobs,
   deleteUserJob,
+  pauseAgentTasks,
+  resumeAgentTasks,
 } from "./jobs";

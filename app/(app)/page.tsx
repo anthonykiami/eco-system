@@ -40,8 +40,9 @@ export default async function Dashboard() {
   const firstName = (user?.name ?? session.user.name ?? "").split(" ")[0];
   const today = new Intl.DateTimeFormat("en-US", { timeZone: timezone, dateStyle: "full" }).format(new Date());
 
+  const pausedAgents = new Set(agents.filter((a) => a.tasksPaused).map((a) => a.id));
   const upcoming = jobs
-    .filter((j) => j.enabled && j.nextRunAt)
+    .filter((j) => j.enabled && j.nextRunAt && !pausedAgents.has(j.agentId))
     .sort((a, b) => a.nextRunAt!.getTime() - b.nextRunAt!.getTime())
     .slice(0, 6);
   const off = jobs.filter((j) => !j.enabled);

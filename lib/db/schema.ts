@@ -117,6 +117,11 @@ export const agents = pgTable(
     telegramBotId: text("telegram_bot_id"),
     telegramBotUsername: text("telegram_bot_username"),
     telegramBotToken: text("telegram_bot_token"),
+    /**
+     * While true, none of this agent's scheduled tasks run. Each task keeps its own on/off setting,
+     * so resuming brings back exactly the ones that were on.
+     */
+    tasksPaused: boolean("tasks_paused").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [

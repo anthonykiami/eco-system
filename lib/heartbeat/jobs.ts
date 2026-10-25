@@ -100,3 +100,24 @@ export async function rescheduleUserJobs(userId: string): Promise<void> {
 export async function deleteUserJob(userId: string, jobId: string): Promise<boolean> {
   return q.deleteJob(userId, jobId);
 }
+
+/** Stops all of an agent's tasks from running, without changing which ones are on. */
+export async function pauseAgentTasks(userId: string, agentId: string): Promise<boolean> {
+  return Boolean(await q.updateAgent(userId, agentId, { tasksPaused: true }));
+}
+
+/**
+ * Lets an agent's tasks run again. Repeating tasks continue from their next time after now, so
+ * runs missed while paused aren't replayed; a one-off whose time passed while paused runs now.
+ */
+export async function resumeAgentTasks(userId: string, agentId: string): Promise<boolean> {
+  const agent = await q.updateAgent(userId, agentId, { tasksPaused: false });
+  if (!agent) return false;
+  const [jobs, timezone] = await Promise.all([q.listJobs(userId), timezoneFor(userId)]);
+  await Promise.all(
+    jobs
+      .filter((job) => job.agentId === agentId && job.enabled && job.kind === "recurring")
+      .map((job) => q.updateJob(userId, job.id, { nextRunAt: computeNextRunAt(job.cronExpression, timezone) })),
+  );
+  return true;
+}

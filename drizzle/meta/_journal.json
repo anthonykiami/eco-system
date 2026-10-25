@@ -50,6 +50,13 @@
       "when": 1792897889094,
       "tag": "0006_agent_bots",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792901221763,
+      "tag": "0007_agent_tasks_paused",
+      "breakpoints": true
     }
   ]
 }

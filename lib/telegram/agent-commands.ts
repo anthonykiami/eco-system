@@ -7,6 +7,7 @@ import {
 import { createAgent, deleteAgent, getAgent, updateAgent } from "@/lib/db/queries";
 import type { Agent } from "@/lib/db/schema";
 import { editHtml } from "./api";
+import { pauseAgentTasks, resumeAgentTasks } from "@/lib/heartbeat";
 import { disconnectAgentBot, renameAgentBot } from "./agent-bots";
 import { deleteAgentTopic, renameAgentTopic } from "./topics";
 import { activeAgent, loadAgents, say, type BotContext } from "./context";
@@ -45,6 +46,11 @@ function cardKeyboard(agent: Agent): InlineKeyboard {
             { text: "✏️ Rename", callback_data: `ar:${id}` },
             { text: "📝 Change its job", callback_data: `ad:${id}` },
           ],
+      [
+        agent.tasksPaused
+          ? { text: "▶️ Resume its tasks", callback_data: `au:${id}` }
+          : { text: "⏸ Pause its tasks", callback_data: `ap:${id}` },
+      ],
       ...(agent.role === "primary" ? [] : [[{ text: "🗑 Delete", callback_data: `ax:${id}` }]]),
       [{ text: "« All agents", callback_data: "al" }],
     ],
@@ -75,7 +81,7 @@ export async function handleAgentButton(
     await startNewAgent(c);
     return true;
   }
-  if (!["a", "at", "ar", "ad", "ax", "ay"].includes(action)) return false;
+  if (!["a", "at", "ar", "ad", "ap", "au", "ax", "ay"].includes(action)) return false;
 
   // Every id from a button is re-checked against this user's agents.
   const agent = await getAgent(c.user.id, arg);
@@ -88,6 +94,13 @@ export async function handleAgentButton(
     case "a":
       await editHtml(c.chatId, messageId, msg.agentCard(agent), { keyboard: cardKeyboard(agent) });
       break;
+    case "ap":
+    case "au": {
+      await (action === "ap" ? pauseAgentTasks(c.user.id, agent.id) : resumeAgentTasks(c.user.id, agent.id));
+      const updated = (await getAgent(c.user.id, agent.id)) ?? agent;
+      await editHtml(c.chatId, messageId, msg.agentCard(updated), { keyboard: cardKeyboard(updated) });
+      break;
+    }
     case "at":
       await switchTo(c, agent);
       break;

@@ -1,8 +1,9 @@
 import { Badge, Button, buttonClass, Card, inputClass, Notice, PageHeader } from "@/components/ui";
 import { MAX_AGENT_DESCRIPTION_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_SPECIALISTS } from "@/lib/agents/naming";
 import { requireActiveUser } from "@/lib/auth/session";
-import { ensurePrimaryAgent, listAgents } from "@/lib/db/queries";
-import { addAgent, connectBot, disconnectBot, editAgent, removeAgent } from "./actions";
+import { ensurePrimaryAgent, listAgents, listJobs } from "@/lib/db/queries";
+import type { Agent } from "@/lib/db/schema";
+import { addAgent, connectBot, disconnectBot, editAgent, removeAgent, setTasksPaused } from "./actions";
 
 const ERRORS: Record<string, string> = {
   invalid: `Names need 1 to ${MAX_AGENT_NAME_LENGTH} characters, with at least one letter or number.`,
@@ -23,14 +24,41 @@ const SAVED: Record<string, string> = {
   updated: "Saved. It applies from the next message.",
   deleted: "Agent deleted, along with its conversations and tasks. Its bot (if any) was disconnected.",
   bot: "Bot connected. Open its chat and tap Start, so it can message you.",
-  unbot: "Bot disconnected. The agent is still reachable through your main assistant.",
+  unbot: "Bot disconnected. The agent is still reachable through your main assistant, and its tasks keep running.",
+  paused: "Its tasks are paused. Nothing it has scheduled will run until you resume.",
+  resumed: "Its tasks are running again. Repeating ones continue from their next time.",
 };
+
+/** "3 scheduled tasks" and a Pause / Resume button for one agent. */
+function TasksControl({ agent, count }: { agent: Agent; count: number }) {
+  return (
+    <form action={setTasksPaused} className="flex flex-wrap items-center gap-3 text-sm">
+      <input type="hidden" name="agentId" value={agent.id} />
+      <input type="hidden" name="paused" value={agent.tasksPaused ? "false" : "true"} />
+      {agent.tasksPaused ? (
+        <Badge tone="warning">tasks paused</Badge>
+      ) : (
+        <span className="text-muted">
+          {count === 0 ? "No scheduled tasks" : `${count} scheduled ${count === 1 ? "task" : "tasks"}`}
+        </span>
+      )}
+      {(count > 0 || agent.tasksPaused) && (
+        <Button type="submit" size="sm" variant={agent.tasksPaused ? "primary" : "ghost"}>
+          {agent.tasksPaused ? "▶ Resume tasks" : "⏸ Pause tasks"}
+        </Button>
+      )}
+    </form>
+  );
+}
 
 export default async function AgentsPage({ searchParams }: PageProps<"/agents">) {
   const session = await requireActiveUser();
   const userId = session.user.id;
   const [primary, params] = await Promise.all([ensurePrimaryAgent(userId), searchParams]);
-  const specialists = (await listAgents(userId)).filter((a) => a.role === "specialized");
+  const [all, jobs] = await Promise.all([listAgents(userId), listJobs(userId)]);
+  const specialists = all.filter((a) => a.role === "specialized");
+  const taskCount = (agentId: string) => jobs.filter((j) => j.agentId === agentId).length;
+  const main = all.find((a) => a.id === primary.id) ?? primary;
   const error = typeof params.error === "string" ? ERRORS[params.error] : undefined;
   const saved = typeof params.saved === "string" ? SAVED[params.saved] : undefined;
   const atLimit = specialists.length >= MAX_SPECIALISTS;
@@ -57,6 +85,7 @@ export default async function AgentsPage({ searchParams }: PageProps<"/agents">)
               Answers in your main Telegram chat and here in Chat. Remembers what you tell it, uses your connected
               accounts, schedules tasks, and creates new agents when you ask.
             </p>
+            <TasksControl agent={main} count={taskCount(main.id)} />
           </div>
         </div>
       </Card>
@@ -81,10 +110,16 @@ export default async function AgentsPage({ searchParams }: PageProps<"/agents">)
                     {agent.telegramBotUsername ? <Badge tone="accent">@{agent.telegramBotUsername}</Badge> : <Badge>no own bot</Badge>}
                   </span>
                   <span className="line-clamp-2 text-sm text-muted">{agent.description}</span>
+                  {agent.tasksPaused && <Badge tone="warning">tasks paused</Badge>}
                 </span>
                 <span className="shrink-0 text-sm text-muted group-open:hidden">Edit</span>
                 <span className="hidden shrink-0 text-sm text-muted group-open:inline">Close</span>
               </summary>
+
+              <section className="mt-5 flex flex-col gap-2 border-t border-line pt-5" aria-label="Scheduled tasks">
+                <h3 className="text-sm font-medium">Scheduled tasks</h3>
+                <TasksControl agent={agent} count={taskCount(agent.id)} />
+              </section>
 
               <section className="mt-5 flex flex-col gap-3 border-t border-line pt-5" aria-label="Telegram bot">
                 <h3 className="text-sm font-medium">Its own Telegram bot</h3>

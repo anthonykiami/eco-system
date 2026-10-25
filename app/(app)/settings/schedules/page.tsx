@@ -70,6 +70,7 @@ export default async function SchedulesPage({ searchParams }: PageProps<"/settin
   const error = typeof params.error === "string" ? ERRORS[params.error] : undefined;
   const queued = params.queued === "1";
   const agentName = (id: string) => agents.find((a) => a.id === id)?.name;
+  const pausedAgents = new Set(agents.filter((a) => a.tasksPaused).map((a) => a.id));
 
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-4 sm:p-8">
@@ -109,6 +110,9 @@ export default async function SchedulesPage({ searchParams }: PageProps<"/settin
                   {jobTitle(job)}
                   {KIND_BADGE[job.kind]}
                   {!job.enabled && <Badge tone="warning">off</Badge>}
+                  {job.enabled && pausedAgents.has(job.agentId) && (
+                    <Badge tone="warning">paused with {agentName(job.agentId) ?? "its agent"}</Badge>
+                  )}
                 </p>
                 <p className="mt-0.5 text-sm text-muted">
                   {job.kind === "recurring" ? describeJob(job, timezone) : job.nextRunAt ? formatWhen(job.nextRunAt, timezone) : "already sent"}

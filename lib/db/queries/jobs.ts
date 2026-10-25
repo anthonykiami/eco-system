@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { scheduledJobs, type ScheduledJob } from "@/lib/db/schema";
+import { agents, scheduledJobs, type ScheduledJob } from "@/lib/db/schema";
 import { getAgent } from "./agents";
 import { NotFoundError } from "./errors";
 
@@ -112,6 +112,7 @@ export async function deleteJob(userId: string, jobId: string): Promise<boolean>
 /**
  * Cross-user by necessity: the heartbeat scans for due jobs across all users.
  * Returns only identifiers — load and run each job via the userId-scoped helpers above.
+ * Jobs of an agent whose tasks are paused stay due, and run once it's resumed.
  */
 export async function listDueJobs(
   now: Date,
@@ -120,7 +121,8 @@ export async function listDueJobs(
   return db
     .select({ id: scheduledJobs.id, userId: scheduledJobs.userId })
     .from(scheduledJobs)
-    .where(and(eq(scheduledJobs.enabled, true), lte(scheduledJobs.nextRunAt, now)))
+    .innerJoin(agents, and(eq(agents.id, scheduledJobs.agentId), eq(agents.userId, scheduledJobs.userId)))
+    .where(and(eq(scheduledJobs.enabled, true), lte(scheduledJobs.nextRunAt, now), eq(agents.tasksPaused, false)))
     .orderBy(asc(scheduledJobs.nextRunAt))
     .limit(limit);
 }

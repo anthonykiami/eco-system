@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import * as q from "@/lib/db/queries";
 import { NotFoundError, updateUser } from "@/lib/db/queries";
 import {
   createOneOffJob,
+  pauseAgentTasks,
+  resumeAgentTasks,
   createUserJob,
   deleteUserJob,
   listUserJobs,
@@ -131,6 +134,30 @@ describe("lib/heartbeat user job helpers", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe("pausing an agent's tasks", () => {
+    it("pauses and resumes only the caller's agent, keeping each task's own setting", async () => {
+      const a = await seedUser("pause-a@example.com");
+      const b = await seedUser("pause-b@example.com");
+      const on = await createUserJob(a.user.id, { agentId: a.agent.id, cronExpression: "0 9 * * *", prompt: "on" });
+      const off = await createUserJob(a.user.id, { agentId: a.agent.id, cronExpression: "0 9 * * *", prompt: "off" });
+      await pauseUserJob(a.user.id, off.id);
+
+      expect(await pauseAgentTasks(b.user.id, a.agent.id)).toBe(false);
+      expect(await resumeAgentTasks(b.user.id, a.agent.id)).toBe(false);
+
+      expect(await pauseAgentTasks(a.user.id, a.agent.id)).toBe(true);
+      expect((await q.getAgent(a.user.id, a.agent.id))?.tasksPaused).toBe(true);
+      // A missed run while paused isn't replayed on resume.
+      await q.updateJob(a.user.id, on.id, { nextRunAt: new Date(Date.now() - 3 * 86_400_000) });
+
+      expect(await resumeAgentTasks(a.user.id, a.agent.id)).toBe(true);
+      const [onAfter, offAfter] = [await q.getJob(a.user.id, on.id), await q.getJob(a.user.id, off.id)];
+      expect(onAfter).toMatchObject({ enabled: true });
+      expect(onAfter!.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
+      expect(offAfter?.enabled).toBe(false);
     });
   });
 });

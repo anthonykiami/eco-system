@@ -262,6 +262,24 @@ describe("POST /api/jobs/run: one-offs", () => {
   });
 });
 
+describe("POST /api/jobs/run: paused agents", () => {
+  it("skips a job queued just before its agent was paused; a one-off waits for the resume", async () => {
+    const { user, agent } = await seedUser("paused-run@example.com", { telegramChatId: "tg-paused" });
+    const job = await q.createJob(user.id, {
+      agentId: agent.id, kind: "once", cronExpression: "0 15 25 10 *", prompt: "check flights", nextRunAt: null,
+    });
+    await q.updateAgent(user.id, agent.id, { tasksPaused: true });
+    const scheduledFor = new Date(Date.now() - 60_000).toISOString();
+
+    const res = await POST(qstashRequest(PATH, { jobId: job.id, userId: user.id, scheduledFor }));
+
+    expect(await res.json()).toEqual({ status: "skipped", reason: "agent_paused" });
+    expect(agents.runAgent).not.toHaveBeenCalled();
+    expect(sentTexts()).toEqual([]);
+    expect((await q.getJob(user.id, job.id))?.nextRunAt?.toISOString()).toBe(scheduledFor);
+  });
+});
+
 describe("POST /api/jobs/run: budget and rate limits", () => {
   it("budget exceeded skips the run, returns 200 and notifies via Telegram at most once per day", async () => {
     const { user, job, message } = await seedJob("broke@example.com", "tg-broke");

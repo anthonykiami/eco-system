@@ -1099,6 +1099,28 @@ describe("photos and voice messages", () => {
   });
 });
 
+describe("pausing an agent's tasks from Telegram", () => {
+  it("the agent card pauses and resumes its tasks", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    await q.ensurePrimaryAgent(user.id);
+    const coach = await q.createAgent(user.id, { name: "Coach", soul: "You coach." });
+
+    await post(buttonUpdate(chatId, `ap:${coach.id}`));
+    expect((await q.getAgent(user.id, coach.id))?.tasksPaused).toBe(true);
+    expect(editedTexts(chatId).at(-1)).toContain("scheduled tasks are paused");
+
+    await post(buttonUpdate(chatId, `au:${coach.id}`));
+    expect((await q.getAgent(user.id, coach.id))?.tasksPaused).toBe(false);
+
+    // Another user's agent id does nothing.
+    const otherChat = nextChatId++;
+    await seedUser({ telegramChatId: otherChat });
+    await post(buttonUpdate(otherChat, `ap:${coach.id}`));
+    expect((await q.getAgent(user.id, coach.id))?.tasksPaused).toBe(false);
+  });
+});
+
 describe("live previews (Threaded Mode)", () => {
   beforeEach(() => {
     h.redis.store.delete("tg:topics-enabled:test");

@@ -10,6 +10,7 @@ import {
 } from "@/lib/agents/naming";
 import { requireActiveUser } from "@/lib/auth/session";
 import { createAgent, deleteAgent, getUser, listAgents, updateAgent } from "@/lib/db/queries";
+import { pauseAgentTasks, resumeAgentTasks } from "@/lib/heartbeat";
 import type { User } from "@/lib/db/schema";
 import { BotSetupError, connectAgentBot, disconnectAgentBot, renameAgentBot } from "@/lib/telegram/agent-bots";
 import { deleteAgentTopic, renameAgentTopic } from "@/lib/telegram/topics";
@@ -118,4 +119,16 @@ export async function disconnectBot(formData: FormData) {
   await disconnectAgentBot(session.user.id, agent);
   revalidatePath(PATH);
   redirect(`${PATH}?saved=unbot`);
+}
+
+/** Pauses or resumes all of one of the user's agents' scheduled tasks. */
+export async function setTasksPaused(formData: FormData) {
+  const session = await requireActiveUser();
+  const agentId = field(formData, "agentId");
+  const paused = field(formData, "paused") === "true";
+  const ok = paused ? await pauseAgentTasks(session.user.id, agentId) : await resumeAgentTasks(session.user.id, agentId);
+  if (!ok) redirect(`${PATH}?error=missing`);
+  revalidatePath(PATH);
+  revalidatePath("/settings/schedules");
+  redirect(`${PATH}?saved=${paused ? "paused" : "resumed"}`);
 }

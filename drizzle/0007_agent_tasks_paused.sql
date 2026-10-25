@@ -1,0 +1,1 @@
+ALTER TABLE "agents" ADD COLUMN "tasks_paused" boolean DEFAULT false NOT NULL;

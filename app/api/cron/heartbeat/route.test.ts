@@ -140,6 +140,26 @@ describe("POST /api/cron/heartbeat: one-offs", () => {
   });
 });
 
+describe("POST /api/cron/heartbeat: paused agents", () => {
+  it("leaves a paused agent's due tasks alone until it's resumed", async () => {
+    const { user, agent } = await seedUser("paused-agent@example.com");
+    const reminder = await q.createJob(user.id, {
+      agentId: agent.id, kind: "reminder", cronExpression: "0 15 25 10 *", prompt: "call mom", nextRunAt: minutesAgo(1),
+    });
+    await q.updateAgent(user.id, agent.id, { tasksPaused: true });
+    const published = () =>
+      fake.qstash.publishJSON.mock.calls.filter(([req]) => (req as { body: { jobId: string } }).body.jobId === reminder.id);
+
+    await POST(qstashRequest(PATH, {}));
+    expect(published()).toHaveLength(0);
+    expect((await q.getJob(user.id, reminder.id))!.nextRunAt).toEqual(reminder.nextRunAt);
+
+    await q.updateAgent(user.id, agent.id, { tasksPaused: false });
+    await POST(qstashRequest(PATH, {}));
+    expect(published()).toHaveLength(1);
+  });
+});
+
 function hourIn(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
 }
