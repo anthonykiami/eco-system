@@ -3,10 +3,16 @@ import { Suspense } from "react";
 import { formatCompact } from "@/components/format";
 import { SystemHealth } from "@/components/system-health";
 import { Badge, Button, Card, Meter, PageHeader } from "@/components/ui";
-import { PLAN_LIMITS, resolvePlan } from "@/lib/agents/limits";
+import { monthlyTokenLimit, PLAN_LIMITS, resolvePlan } from "@/lib/agents/limits";
 import { requireAdmin } from "@/lib/auth/session";
 import { currentMonth } from "@/lib/db/queries";
-import { adminListUsage, adminListUsers, adminSetUserPlan, adminSetUserStatus } from "@/lib/db/queries/admin";
+import {
+  adminListUsage,
+  adminListUsers,
+  adminSetUserPlan,
+  adminSetUserStatus,
+  adminSetUserTokenLimit,
+} from "@/lib/db/queries/admin";
 import type { UserStatus } from "@/lib/db/schema";
 
 async function setStatus(formData: FormData) {
@@ -28,6 +34,26 @@ async function setPlan(formData: FormData) {
   const plan = formData.get("plan");
   if (typeof userId !== "string" || typeof plan !== "string" || !PLANS.includes(plan)) return;
   await adminSetUserPlan(userId, plan);
+  revalidatePath("/admin");
+}
+
+/** Caps are entered in millions of tokens. */
+const MAX_CAP_MILLIONS = 1000;
+
+/** Sets a user's own monthly token cap, in millions; empty goes back to the plan's default. */
+async function setTokenLimit(formData: FormData) {
+  "use server";
+  await requireAdmin();
+  const userId = formData.get("userId");
+  const raw = String(formData.get("millions") ?? "").trim();
+  if (typeof userId !== "string") return;
+  if (raw === "") {
+    await adminSetUserTokenLimit(userId, null);
+  } else {
+    const millions = Number(raw);
+    if (!Number.isFinite(millions) || millions <= 0 || millions > MAX_CAP_MILLIONS) return;
+    await adminSetUserTokenLimit(userId, Math.round(millions * 1_000_000));
+  }
   revalidatePath("/admin");
 }
 
@@ -63,12 +89,13 @@ export default async function AdminPage() {
 
       <Card title="Users">
         <div className="-mx-5 overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="w-full min-w-[860px] text-left text-sm">
             <thead className="border-b border-line text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th className="px-5 py-2 font-medium">User</th>
                 <th className="px-3 py-2 font-medium">Plan</th>
                 <th className="px-3 py-2 font-medium">Usage this month</th>
+                <th className="px-3 py-2 font-medium">Monthly cap</th>
                 <th className="px-3 py-2 font-medium">Telegram</th>
                 <th className="px-3 py-2 font-medium">Access</th>
               </tr>
@@ -77,7 +104,8 @@ export default async function AdminPage() {
               {users.map((u) => {
                 const row = usageBy.get(u.id);
                 const used = (row?.inputTokens ?? 0) + (row?.outputTokens ?? 0);
-                const limit = PLAN_LIMITS[resolvePlan(u.plan)].monthlyTokens;
+                const limit = monthlyTokenLimit(u);
+                const planDefault = PLAN_LIMITS[resolvePlan(u.plan)].monthlyTokens;
                 const next: UserStatus = u.status === "active" ? "waitlist" : "active";
                 return (
                   <tr key={u.id} className="align-middle">
@@ -117,6 +145,29 @@ export default async function AdminPage() {
                           {formatCompact(used)} / {formatCompact(limit)} · {row?.messageCount ?? 0} msgs
                         </span>
                       </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <form action={setTokenLimit} className="flex items-center gap-1.5">
+                        <input type="hidden" name="userId" value={u.id} />
+                        <input
+                          name="millions"
+                          type="number"
+                          min={0.1}
+                          max={MAX_CAP_MILLIONS}
+                          step={0.1}
+                          defaultValue={u.monthlyTokenLimit != null ? u.monthlyTokenLimit / 1_000_000 : ""}
+                          placeholder={String(planDefault / 1_000_000)}
+                          aria-label={`Monthly token cap for ${u.email}, in millions`}
+                          className="w-20 rounded-md border border-line bg-surface px-2 py-1 text-sm"
+                        />
+                        <span className="text-xs text-muted">M</span>
+                        <Button type="submit" size="sm">
+                          Save
+                        </Button>
+                      </form>
+                      <p className="mt-1 text-xs text-muted">
+                        {u.monthlyTokenLimit != null ? "Custom. Clear it to use the plan's." : "Plan default"}
+                      </p>
                     </td>
                     <td className="px-3 py-3">
                       {u.telegramChatId ? <Badge tone="success">linked</Badge> : <Badge>not linked</Badge>}

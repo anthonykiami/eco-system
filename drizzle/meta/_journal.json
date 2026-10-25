@@ -57,6 +57,13 @@
       "when": 1792901221763,
       "tag": "0007_agent_tasks_paused",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792904267262,
+      "tag": "0008_user_token_limit",
+      "breakpoints": true
     }
   ]
 }

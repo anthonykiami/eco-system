@@ -336,6 +336,19 @@ describe("plans", () => {
     expect(toolNamesOf(agentCalls()[0])).toContain("web_search");
   });
 
+  it("an admin-set cap replaces the plan's monthly budget, both up and down", async () => {
+    const { userId } = await seedUser("custom-cap");
+    await q.incrementUsage(userId, q.currentMonth(), { inputTokens: PLAN_LIMITS.free.monthlyTokens, outputTokens: 0 });
+
+    // Over the free plan's budget, but under a raised cap.
+    await db.update(users).set({ monthlyTokenLimit: 1_000_000 }).where(eq(users.id, userId));
+    await expect(runAgent({ userId, message: "hi", channel: "web" })).resolves.toBeDefined();
+
+    // A lowered cap stops the user even though the plan would allow more.
+    await db.update(users).set({ plan: "max", monthlyTokenLimit: 100_000 }).where(eq(users.id, userId));
+    await expect(runAgent({ userId, message: "hi", channel: "web" })).rejects.toBeInstanceOf(BudgetExceededError);
+  });
+
   it("treats an unknown plan name as free", async () => {
     const { userId } = await seedUser("legacy");
     await db.update(users).set({ plan: "enterprise-trial" }).where(eq(users.id, userId));

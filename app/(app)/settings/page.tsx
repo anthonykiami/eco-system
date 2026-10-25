@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge, Button, Card, PageHeader } from "@/components/ui";
-import { PLAN_LIMITS, resolvePlan } from "@/lib/agents/limits";
+import { monthlyTokenLimit, resolvePlan } from "@/lib/agents/limits";
 import { requireActiveUser } from "@/lib/auth/session";
 import { getUser } from "@/lib/db/queries";
 import { setTimezone } from "./actions";
@@ -32,7 +32,8 @@ export default async function SettingsPage() {
           <dd className="flex items-center gap-2">
             <Badge tone="accent">{plan}</Badge>
             <span className="text-muted">
-              {PLAN_LIMITS[plan].monthlyTokens.toLocaleString("en-US")} tokens a month
+              {monthlyTokenLimit({ plan, monthlyTokenLimit: user?.monthlyTokenLimit ?? null }).toLocaleString("en-US")}{" "}
+              tokens a month{user?.monthlyTokenLimit != null && " (custom cap)"}
             </span>
           </dd>
           <dt className="text-muted">Timezone</dt>

@@ -6,7 +6,7 @@ import { BudgetExceededError, RateLimitError } from "./errors";
 
 export type PlanLimits = {
   messagesPerMinute: number;
-  /** Input + output tokens per calendar month (UTC). */
+  /** Input + output tokens per calendar month (UTC), unless an admin sets the user's own cap. */
   monthlyTokens: number;
   /** Model steps (tool calls plus the final answer) per agent turn. */
   maxSteps: number;
@@ -20,6 +20,11 @@ export const PLAN_LIMITS = {
 } as const satisfies Record<string, PlanLimits>;
 
 export type Plan = keyof typeof PLAN_LIMITS;
+
+/** The user's monthly token allowance: the cap an admin set for them, or their plan's default. */
+export function monthlyTokenLimit(user: Pick<User, "plan" | "monthlyTokenLimit">): number {
+  return user.monthlyTokenLimit ?? PLAN_LIMITS[resolvePlan(user.plan)].monthlyTokens;
+}
 
 /** Unknown plan names fall back to the free tier. */
 export function resolvePlan(plan: string): Plan {
@@ -56,8 +61,9 @@ export async function enforceLimits(userId: string, now: Date = new Date()): Pro
 
   const usage = await getUsage(userId, currentMonth(now));
   const used = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
-  if (used >= limits.monthlyTokens) {
-    throw new BudgetExceededError(`User ${userId} used ${used}/${limits.monthlyTokens} tokens`);
+  const cap = monthlyTokenLimit(user);
+  if (used >= cap) {
+    throw new BudgetExceededError(`User ${userId} used ${used}/${cap} tokens`);
   }
 
   return user;

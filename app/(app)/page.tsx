@@ -5,7 +5,7 @@ import { SystemHealth } from "@/components/system-health";
 import { TodaySkeleton, TodayView } from "@/components/today";
 import { Badge, Card, EmptyState, LinkButton, Meter, Status } from "@/components/ui";
 import { listToolkitConnections } from "@/lib/agents/composio";
-import { PLAN_LIMITS, resolvePlan } from "@/lib/agents/limits";
+import { monthlyTokenLimit, resolvePlan } from "@/lib/agents/limits";
 import { requireActiveUser } from "@/lib/auth/session";
 import {
   currentMonth,
@@ -49,7 +49,7 @@ export default async function Dashboard() {
   const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? "Agent";
 
   const plan = resolvePlan(user?.plan ?? "free");
-  const limit = PLAN_LIMITS[plan].monthlyTokens;
+  const limit = user ? monthlyTokenLimit(user) : monthlyTokenLimit({ plan, monthlyTokenLimit: null });
   const used = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
 
   return (

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "monthly_token_limit" integer;

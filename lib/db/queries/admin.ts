@@ -62,3 +62,12 @@ export async function adminRemoveIntegration(slug: string): Promise<boolean> {
     .returning({ slug: integrationCatalog.slug });
   return rows.length > 0;
 }
+
+/**
+ * Sets a user's own monthly token cap, overriding their plan's default; null goes back to the
+ * default. The caller validates the number.
+ */
+export async function adminSetUserTokenLimit(targetUserId: string, limit: number | null): Promise<User | undefined> {
+  const [row] = await db.update(users).set({ monthlyTokenLimit: limit }).where(eq(users.id, targetUserId)).returning();
+  return row;
+}

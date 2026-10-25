@@ -1,5 +1,5 @@
 import { listToolkitConnections, type ToolkitConnection } from "@/lib/agents/composio";
-import { PLAN_LIMITS, resolvePlan } from "@/lib/agents/limits";
+import { monthlyTokenLimit } from "@/lib/agents/limits";
 import { currentMonth, getUsage, updateUser } from "@/lib/db/queries";
 import { rescheduleUserJobs } from "@/lib/heartbeat";
 import { say, type BotContext } from "./context";
@@ -67,7 +67,7 @@ export async function timezone(c: BotContext, input: string): Promise<void> {
 /** /usage: this month's tokens against the plan's allowance. */
 export async function usage(c: BotContext): Promise<void> {
   const row = await getUsage(c.user.id, currentMonth());
-  const limit = PLAN_LIMITS[resolvePlan(c.user.plan)].monthlyTokens;
+  const limit = monthlyTokenLimit(c.user);
   const used = (row?.inputTokens ?? 0) + (row?.outputTokens ?? 0);
   const percent = Math.min(100, Math.round((used / limit) * 100));
   const fmt = (n: number) => n.toLocaleString("en-US");

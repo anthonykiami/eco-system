@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { adminAddIntegration, adminListUsage, adminRemoveIntegration, adminSetUserPlan } from "./admin";
+import {
+  adminAddIntegration,
+  adminListUsage,
+  adminRemoveIntegration,
+  adminSetUserPlan,
+  adminSetUserTokenLimit,
+} from "./admin";
 import { listIntegrationCatalog } from "./catalog";
 import { incrementUsage } from "./usage";
 import { getUser } from "./users";
@@ -50,5 +56,15 @@ describe("integration catalog", () => {
     expect(await adminRemoveIntegration("NOTION")).toBe(true);
     expect(await adminRemoveIntegration("NOTION")).toBe(false);
     expect((await listIntegrationCatalog()).some((e) => e.slug === "NOTION")).toBe(false);
+  });
+});
+
+describe("adminSetUserTokenLimit", () => {
+  it("sets and clears only the target user's cap", async () => {
+    const [target, other] = [await seed("cap-target"), await seed("cap-other")];
+
+    expect((await adminSetUserTokenLimit(target.id, 50_000_000))?.monthlyTokenLimit).toBe(50_000_000);
+    expect((await getUser(other.id))?.monthlyTokenLimit).toBeNull();
+    expect((await adminSetUserTokenLimit(target.id, null))?.monthlyTokenLimit).toBeNull();
   });
 });

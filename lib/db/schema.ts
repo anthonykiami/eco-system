@@ -48,6 +48,8 @@ export const users = pgTable("users", {
   emailVerified: timestamp("email_verified", { withTimezone: true, mode: "date" }),
   status: userStatus("status").notNull().default("active"),
   plan: text("plan").notNull().default("free"),
+  /** Input + output tokens allowed per month, set by an admin. Null means the plan's default. */
+  monthlyTokenLimit: integer("monthly_token_limit"),
   timezone: text("timezone").notNull().default("America/New_York"),
   telegramChatId: text("telegram_chat_id").unique(),
   telegramLinkedAt: timestamp("telegram_linked_at", { withTimezone: true, mode: "date" }),
