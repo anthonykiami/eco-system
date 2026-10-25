@@ -29,9 +29,9 @@ const CX = W / 2;
 const CY = H / 2 + 6;
 
 function place(i: number, n: number) {
-  // Spread around an ellipse, starting at the top and leaving the bottom-center to the label.
-  const angle = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(n, 3) + (n === 2 ? Math.PI / 4 : 0);
-  return { x: CX + Math.cos(angle) * 255, y: CY + Math.sin(angle) * 168 };
+  // Two nodes sit either side of the center; more spread evenly around the ellipse from the top.
+  const angle = n === 2 ? Math.PI * (1 - i) : -Math.PI / 2 + (i * 2 * Math.PI) / n;
+  return { x: CX + Math.cos(angle) * 238, y: CY + Math.sin(angle) * 168 };
 }
 
 export function Orchestrator({ center, nodes }: { center: { name: string; href: string }; nodes: OrbitNode[] }) {

@@ -58,8 +58,13 @@ export default async function Dashboard() {
 
   const specialists = agents.filter((a) => a.role === "specialized");
   const palette: OrbitNode["color"][] = ["blue", "teal", "violet", "green"];
+  // Up to six nodes: the specialists, then Tasks. Past five specialists, the fifth slot
+  // becomes "+N more", which opens the Agents page.
+  const MAX_SPECIALIST_NODES = 5;
+  const overflow = specialists.length > MAX_SPECIALIST_NODES;
+  const shownSpecialists = overflow ? specialists.slice(0, MAX_SPECIALIST_NODES - 1) : specialists;
   const nodes: OrbitNode[] = [
-    ...specialists.slice(0, 4).map((a, i) => ({
+    ...shownSpecialists.map((a, i) => ({
       key: a.id,
       label: a.name,
       sub: a.tasksPaused ? "Specialist · tasks paused" : "Specialist agent · chat",
@@ -67,14 +72,18 @@ export default async function Dashboard() {
       color: palette[i % palette.length],
       icon: <span className="text-lg font-semibold">{a.name.slice(0, 1)}</span>,
     })),
-    {
-      key: "memory",
-      label: "Memory",
-      sub: "Remembers · Connects · Learns",
-      href: "/chat",
-      color: "green" as const,
-      icon: <NodeIcon path="M5 19c8 0 14-6 14-14C11 5 5 11 5 19Zm0 0 7-7" />,
-    },
+    ...(overflow
+      ? [
+          {
+            key: "more",
+            label: `+${specialists.length - shownSpecialists.length} more`,
+            sub: "All your agents",
+            href: "/agents",
+            color: "green" as const,
+            icon: <span className="text-lg font-semibold">+</span>,
+          },
+        ]
+      : []),
     {
       key: "tasks",
       label: "Tasks",
@@ -115,8 +124,8 @@ export default async function Dashboard() {
             </LinkButton>
           </div>
         </div>
-        <div className="relative">
-          <div className="absolute -top-2 right-0 z-10 hidden xl:block">
+        <div className="flex flex-col gap-2">
+          <div className="hidden justify-end xl:flex">
             <Clock timeZone={timezone} />
           </div>
           <Orchestrator center={{ name: primary.name, href: "/chat" }} nodes={nodes} />
