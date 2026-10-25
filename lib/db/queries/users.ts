@@ -47,3 +47,18 @@ export async function getUserByTelegramChatId(telegramChatId: string): Promise<U
     .limit(1);
   return row;
 }
+
+/** Links (or with null, unlinks) the Telegram group where the user talks to all their agents. */
+export async function setTelegramGroupChatId(
+  userId: string,
+  telegramGroupChatId: string | null,
+): Promise<User | undefined> {
+  const [row] = await db.update(users).set({ telegramGroupChatId }).where(eq(users.id, userId)).returning();
+  return row;
+}
+
+/** Like getUserByTelegramChatId, for the user's linked group: the webhook only knows the chat id. */
+export async function getUserByTelegramGroupChatId(telegramGroupChatId: string): Promise<User | undefined> {
+  const [row] = await db.select().from(users).where(eq(users.telegramGroupChatId, telegramGroupChatId)).limit(1);
+  return row;
+}

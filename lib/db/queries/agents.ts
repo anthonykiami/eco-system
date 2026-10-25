@@ -5,7 +5,12 @@ import { agents, type Agent } from "@/lib/db/schema";
 
 export type NewAgentInput = Pick<Agent, "name" | "soul"> &
   Partial<Pick<Agent, "role" | "description">>;
-export type AgentPatch = Partial<Pick<Agent, "name" | "description" | "soul" | "telegramTopicId">>;
+export type AgentPatch = Partial<
+  Pick<
+    Agent,
+    "name" | "description" | "soul" | "telegramTopicId" | "telegramBotId" | "telegramBotUsername" | "telegramBotToken"
+  >
+>;
 
 export async function listAgents(userId: string): Promise<Agent[]> {
   return db.select().from(agents).where(eq(agents.userId, userId)).orderBy(asc(agents.createdAt));
@@ -72,4 +77,13 @@ export async function deleteAgent(userId: string, agentId: string): Promise<bool
     .where(and(eq(agents.userId, userId), eq(agents.id, agentId)))
     .returning({ id: agents.id });
   return rows.length > 0;
+}
+
+/**
+ * Not keyed by userId: an agent's bot webhook only knows the bot's id and must resolve it to the
+ * agent (and through agent.userId, its owner). Everything after this goes through userId-scoped helpers.
+ */
+export async function getAgentByTelegramBotId(telegramBotId: string): Promise<Agent | undefined> {
+  const [row] = await db.select().from(agents).where(eq(agents.telegramBotId, telegramBotId)).limit(1);
+  return row;
 }

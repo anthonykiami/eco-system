@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireActiveUser } from "@/lib/auth/session";
-import { clearTelegramChatId } from "@/lib/db/queries";
+import { clearTelegramChatId, setTelegramGroupChatId } from "@/lib/db/queries";
 import { createLinkCode } from "@/lib/telegram/linking";
 
 export type ConnectState =
@@ -24,5 +24,12 @@ export async function connectTelegram(): Promise<ConnectState> {
 export async function unlinkTelegram(): Promise<void> {
   const session = await requireActiveUser();
   await clearTelegramChatId(session.user.id);
+  revalidatePath("/settings/telegram");
+}
+
+/** Stops using the linked group; the bots stay in it but ignore it until it's linked again. */
+export async function unlinkGroup(): Promise<void> {
+  const session = await requireActiveUser();
+  await setTelegramGroupChatId(session.user.id, null);
   revalidatePath("/settings/telegram");
 }

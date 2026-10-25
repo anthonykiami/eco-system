@@ -57,8 +57,8 @@ async function telegramCheck(): Promise<Check> {
 
 async function topicsCheck(): Promise<Check> {
   return (await topicsEnabled())
-    ? { name: "Agent topics", tone: "success", detail: "Threaded Mode is on: agents get topics, replies stream." }
-    : { name: "Agent topics", tone: "warning", detail: "Threaded Mode is off in BotFather: one chat, no streaming." };
+    ? { name: "Live replies", tone: "success", detail: "Threaded Mode is on for the main bot: replies stream as they're written." }
+    : { name: "Live replies", tone: "warning", detail: "Threaded Mode is off in BotFather: replies arrive all at once." };
 }
 
 async function redisCheck(): Promise<Check> {

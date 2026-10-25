@@ -106,6 +106,8 @@ Never query user-owned tables outside lib/db/queries/. Every query must be scope
 - Creating a row that references another row (a chat's agent, a message's chat, a job's agent) checks ownership first. If the check fails it throws `NotFoundError`.
 - Cross-user exceptions are named explicitly and are the only ones allowed:
   - `getUserByTelegramChatId`: webhook resolves chat → user.
+  - `getUserByTelegramGroupChatId`: webhook resolves the user's linked group → user.
+  - `getAgentByTelegramBotId`: an agent bot's webhook resolves bot → agent (and its owner).
   - `listDueJobs`: heartbeat scan. It returns ids only.
   - `admin*` in `lib/db/queries/admin.ts`: call only after `requireAdmin()`.
   - `listIntegrationCatalog` (`catalog.ts`): the apps the owner added for everyone to connect. It's shared config, not user data; only `adminAddIntegration` / `adminRemoveIntegration` change it.

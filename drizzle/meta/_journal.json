@@ -43,6 +43,13 @@
       "when": 1792892966375,
       "tag": "0005_integration_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792897889094,
+      "tag": "0006_agent_bots",
+      "breakpoints": true
     }
   ]
 }

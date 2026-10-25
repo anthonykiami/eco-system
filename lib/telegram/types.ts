@@ -12,14 +12,27 @@ export const telegramChatSchema = z.object({
 });
 
 const fileSchema = z.object({ file_id: z.string(), file_size: z.number().optional() });
+
+/** Who sent a message or tapped a button. In a group, the bots only answer their owner. */
+export const telegramUserSchema = z.object({
+  id: z.number(),
+  is_bot: z.boolean().optional(),
+  username: z.string().optional(),
+});
+
+/** Parts of a message's text, e.g. an @mention of a bot. */
+const entitySchema = z.object({ type: z.string(), offset: z.number(), length: z.number() });
 const timedFileSchema = fileSchema.extend({ duration: z.number(), mime_type: z.string().optional() });
 
 export const telegramMessageSchema = z.object({
   message_id: z.number(),
   chat: telegramChatSchema,
+  from: telegramUserSchema.optional(),
   text: z.string().optional(),
+  entities: z.array(entitySchema).optional(),
   /** Text sent with a photo or file. */
   caption: z.string().optional(),
+  caption_entities: z.array(entitySchema).optional(),
   /** One photo in several sizes, smallest first. */
   photo: z.array(fileSchema.extend({ width: z.number(), height: z.number() })).optional(),
   voice: timedFileSchema.optional(),
@@ -34,12 +47,13 @@ export const telegramMessageSchema = z.object({
   forum_topic_created: z.object({}).passthrough().optional(),
   forum_topic_edited: z.object({}).passthrough().optional(),
   /** Set when the user replies to an earlier message; only its id is read. */
-  reply_to_message: z.object({ message_id: z.number() }).optional(),
+  reply_to_message: z.object({ message_id: z.number(), from: telegramUserSchema.optional() }).optional(),
 });
 
 /** A tap on an inline keyboard button. `message` is absent for very old messages. */
 export const telegramCallbackQuerySchema = z.object({
   id: z.string(),
+  from: telegramUserSchema.optional(),
   message: telegramMessageSchema.optional(),
   data: z.string().optional(),
 });

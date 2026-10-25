@@ -51,6 +51,8 @@ export const users = pgTable("users", {
   timezone: text("timezone").notNull().default("America/New_York"),
   telegramChatId: text("telegram_chat_id").unique(),
   telegramLinkedAt: timestamp("telegram_linked_at", { withTimezone: true, mode: "date" }),
+  /** The Telegram group where the user talks to all their agents' bots at once, if linked. */
+  telegramGroupChatId: text("telegram_group_chat_id").unique(),
   createdAt: createdAt(),
 });
 
@@ -108,10 +110,19 @@ export const agents = pgTable(
     soul: text("soul").notNull(),
     /** The topic this agent has in the user's Telegram chat with the bot, if any. */
     telegramTopicId: integer("telegram_topic_id"),
+    /**
+     * The agent's own Telegram bot, made by the user in @BotFather. The token is encrypted
+     * (lib/telegram/secret-box.ts); the id is the number before the token's colon.
+     */
+    telegramBotId: text("telegram_bot_id"),
+    telegramBotUsername: text("telegram_bot_username"),
+    telegramBotToken: text("telegram_bot_token"),
     createdAt: createdAt(),
   },
   (t) => [
     index("agents_user_id_idx").on(t.userId),
+    // A bot belongs to one agent; its webhook looks the agent up by this.
+    uniqueIndex("agents_telegram_bot_id_unique").on(t.telegramBotId),
     // At most one primary agent per user.
     uniqueIndex("agents_one_primary_per_user").on(t.userId).where(sql`${t.role} = 'primary'`),
   ],

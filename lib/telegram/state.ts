@@ -8,7 +8,9 @@ import { redis } from "@/lib/upstash";
 
 const activeAgentKey = (userId: string) => `tg:active-agent:${userId}`;
 const flowKey = (userId: string) => `tg:flow:${userId}`;
-const replyAgentKey = (userId: string, messageId: number) => `tg:reply-agent:${userId}:${messageId}`;
+// Message ids are only unique within a chat, so the key carries the chat.
+const replyAgentKey = (userId: string, chatId: number, messageId: number) =>
+  `tg:reply-agent:${userId}:${chatId}:${messageId}`;
 
 /** How long a reply to an agent's message still reaches that agent. */
 export const REPLY_AGENT_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -49,12 +51,17 @@ export async function clearFlow(userId: string): Promise<void> {
 }
 
 /** Remembers which agent wrote these bot messages, so a reply to one goes back to that agent. */
-export async function rememberReplyAgent(userId: string, messageIds: number[], agentId: string): Promise<void> {
+export async function rememberReplyAgent(
+  userId: string,
+  chatId: number,
+  messageIds: number[],
+  agentId: string,
+): Promise<void> {
   await Promise.all(
-    messageIds.map((id) => redis.set(replyAgentKey(userId, id), agentId, { ex: REPLY_AGENT_TTL_SECONDS })),
+    messageIds.map((id) => redis.set(replyAgentKey(userId, chatId, id), agentId, { ex: REPLY_AGENT_TTL_SECONDS })),
   );
 }
 
-export async function getReplyAgentId(userId: string, messageId: number): Promise<string | undefined> {
-  return (await redis.get<string>(replyAgentKey(userId, messageId))) ?? undefined;
+export async function getReplyAgentId(userId: string, chatId: number, messageId: number): Promise<string | undefined> {
+  return (await redis.get<string>(replyAgentKey(userId, chatId, messageId))) ?? undefined;
 }

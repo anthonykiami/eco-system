@@ -73,6 +73,22 @@ describe("per-user isolation in lib/db/queries", () => {
       expect(await q.listChats(a.userId, { agentId: b.agent.id })).toEqual([]);
     });
 
+    it("agents: a bot id resolves only to the agent that owns it", async () => {
+      expect(await q.updateAgent(a.userId, b.agent.id, { telegramBotId: "999", telegramBotToken: "x" })).toBeUndefined();
+      expect(await q.getAgentByTelegramBotId("999")).toBeUndefined();
+      await q.updateAgent(b.userId, b.agent.id, { telegramBotId: "777" });
+      expect((await q.getAgentByTelegramBotId("777"))?.userId).toBe(b.userId);
+      await q.updateAgent(b.userId, b.agent.id, { telegramBotId: null });
+    });
+
+    it("users: a linked group resolves only to its owner", async () => {
+      await q.setTelegramGroupChatId(a.userId, "-100123");
+      expect((await q.getUserByTelegramGroupChatId("-100123"))?.id).toBe(a.userId);
+      expect((await q.getUser(b.userId))?.telegramGroupChatId).toBeNull();
+      await q.setTelegramGroupChatId(a.userId, null);
+      expect(await q.getUserByTelegramGroupChatId("-100123")).toBeUndefined();
+    });
+
     it("chats: Telegram topics are per user", async () => {
       const topicChat = await q.createChat(b.userId, { agentId: b.agent.id, channel: "telegram", telegramTopicId: 7 });
       expect(await q.getLatestTopicChat(a.userId, 7)).toBeUndefined();

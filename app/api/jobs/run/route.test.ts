@@ -3,6 +3,7 @@ import { BudgetExceededError, RateLimitError } from "@/lib/agents/errors";
 import * as q from "@/lib/db/queries";
 import { jobLockKey } from "@/lib/heartbeat/run-job";
 import { qstashRequest, seedUser, signQStash } from "@/lib/heartbeat/testing";
+import { encryptToken } from "@/lib/telegram/secret-box";
 import { POST } from "./route";
 
 vi.mock("@/lib/db", async () => (await import("@/test/db")).createTestDbModule());
@@ -129,6 +130,39 @@ describe("POST /api/jobs/run: running", () => {
       { chat_id: "tg-topic", text: "<b>Coach</b>\ncheck-in", parse_mode: "HTML", link_preview_options: { is_disabled: true } },
     ]);
     expect((await q.getAgent(user.id, coach.id))?.telegramTopicId).toBeNull();
+  });
+
+  it("sends a specialist's result through its own bot, or labeled through the main bot if that fails", async () => {
+    const { user } = await seedUser("ownbot@example.com", { telegramChatId: "tg-ownbot" });
+    const coach = await q.createAgent(user.id, { name: "Coach", soul: "You coach." });
+    const token = `600700800:${"E".repeat(35)}`;
+    await q.updateAgent(user.id, coach.id, { telegramBotId: "600700800", telegramBotToken: encryptToken(token) });
+    const run = async () => {
+      const job = await q.createJob(user.id, {
+        agentId: coach.id, cronExpression: "0 9 * * *", prompt: "check-in", nextRunAt: new Date(Date.now() + 86_400_000),
+      });
+      await POST(qstashRequest(PATH, { jobId: job.id, userId: user.id, scheduledFor: new Date(Date.now() - 60_000).toISOString() }));
+    };
+    const sent = () =>
+      telegram.mock.calls.map(([url, init]) => ({
+        viaCoach: String(url).includes(`/bot${token}/`),
+        text: (JSON.parse(String(init?.body)) as { text: string }).text,
+      }));
+
+    await run();
+    expect(sent()).toEqual([{ viaCoach: true, text: "check-in" }]);
+
+    // The user never tapped Start on Coach's bot, so it can't message them.
+    telegram.mockClear();
+    telegram.mockImplementationOnce(async () =>
+      new Response(JSON.stringify({ ok: false, error_code: 403, description: "Forbidden: bot can't initiate conversation with a user" }), { status: 403 }),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await run();
+    expect(sent()).toEqual([
+      { viaCoach: true, text: "check-in" },
+      { viaCoach: false, text: "<b>Coach</b>\ncheck-in" },
+    ]);
   });
 
   it("does not send anything to Telegram when the user hasn't linked it", async () => {

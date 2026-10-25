@@ -6,6 +6,8 @@ import { escapeHtml } from "./format";
 /** User-facing bot replies (HTML parse mode). */
 
 export const settingsUrl = () => `${env.APP_URL}/settings/telegram`;
+export const agentsUrl = () => `${env.APP_URL}/agents`;
+const mainBot = () => `@${env.TELEGRAM_BOT_USERNAME}`;
 export const connectionsUrl = () => `${env.APP_URL}/settings/integrations`;
 
 /** The agent list shows the start of each description; the agent's card shows all of it. */
@@ -39,6 +41,54 @@ export const LINK_ALREADY_LINKED = "This chat is already linked to your account.
 
 export const LINK_SUCCESS =
   "✅ Your Telegram is now linked. Send me a message to get started, or /help to see everything I can do.";
+
+// ─── Agents' own bots and the group ─────────────────────────────────────────
+
+export const AGENT_BOT_UNLINKED = () =>
+  `This is one of your agents' own bots. First link your account with your main assistant, ${mainBot()}, then come back here.`;
+
+export const AGENT_BOT_NOT_YOURS = "This bot belongs to someone else's assistant, so it can't help you.";
+
+export const agentBotWelcome = (agent: Agent) =>
+  `👋 I'm ${name(agent)}. Message me here and I'll answer directly. Your main assistant, ${mainBot()}, can still hand me work too.`;
+
+export const agentBotHelp = (agent: Agent) =>
+  [
+    `<b>${escapeHtml(agent.name)}</b>${agent.description ? `: ${escapeHtml(agent.description)}` : ""}`,
+    "",
+    "Message me (text, a photo or a voice message) and I'll answer.",
+    "/new — start a fresh conversation",
+    "/tasks — scheduled tasks · /newtask — schedule one",
+    "/connections · /usage · /cancel",
+    "",
+    `To add, change or remove agents, use your main assistant, ${mainBot()}, or the web.`,
+  ].join("\n");
+
+export const LINKGROUP_IN_GROUP = "Send /linkgroup inside the group you want to use with your agents.";
+
+export const LINKGROUP_UNKNOWN_USER = `Link your account with ${mainBot()} in a private chat first, then send /linkgroup here again.`;
+
+export const GROUP_UNLINKED = "This group is no longer linked to your agents.";
+
+export const groupLinked = (agents: Agent[]) => {
+  const withBots = agents.filter((a) => a.telegramBotUsername);
+  return [
+    "✅ This group is now where you talk to all your agents.",
+    "",
+    "• A message with no @mention goes to your main assistant.",
+    "• <code>@agent_bot …</code>, or replying to an agent's message, goes to that agent, who answers as itself.",
+    "",
+    withBots.length > 0
+      ? `Add your agents' bots to this group if they aren't here yet: ${withBots.map((a) => `@${a.telegramBotUsername}`).join(", ")}.`
+      : "Your agents don't have their own bots yet. Give them one on the Agents page, then add the bots here.",
+    "Make me an admin of this group so I can see every message (Telegram only shows bots the messages meant for them otherwise).",
+  ].join("\n");
+};
+
+export const mentionWithoutMessage = (agent: Agent) =>
+  `Write your message after ${handle(agent)}, e.g. <code>@${displayHandle(agent)} plan my week</code>.`;
+
+export const delegatedHere = (from: string) => `👋 <i>${escapeHtml(from)} asked me to help with this…</i>`;
 
 export const WAITLIST =
   "You're on the waitlist. We're letting people in gradually and will email you as soon as your account is ready.";
@@ -74,7 +124,7 @@ export const HELP = [
   "Just send a message (text, a photo or a voice message): your main agent answers, and hands work to your other agents when it fits.",
   "<code>@name your message</code> sends one message straight to a specific agent. Replying to an agent's message does the same.",
   "/talk — keep talking to one agent · /main — back to the main agent",
-  "Each of your other agents also has its own topic in this chat: open it to talk to that agent alone.",
+  "Agents can also have their own bot (a separate chat each), and you can talk to all of them in one group: see Settings → Telegram on the web.",
   "/new — start a fresh conversation",
   "",
   "<b>Agents</b>",
@@ -92,9 +142,6 @@ export const HELP = [
 ].join("\n");
 
 // ─── Conversation ───────────────────────────────────────────────────────────
-
-export const topicCreated = (agent: Agent) =>
-  `🧵 ${name(agent)} now has its own topic. Open it from the topic list to talk to it directly; its scheduled results land there too.`;
 
 export const newChatWith = (agent: Agent) => `🆕 Started a new conversation with ${name(agent)}.`;
 
@@ -138,6 +185,11 @@ export const agentCard = (agent: Agent) =>
   [
     `${name(agent)} ${handle(agent)}${agent.role === "primary" ? " · main agent" : ""}`,
     agent.description ? `\n${escapeHtml(agent.description)}` : "",
+    agent.telegramBotUsername
+      ? `\nIts own chat: @${agent.telegramBotUsername}`
+      : agent.role === "primary"
+        ? ""
+        : `\nGive it its own chat on the <a href="${agentsUrl()}">Agents page</a>.`,
   ].join("\n");
 
 export const confirmDeleteAgent = (agent: Agent) =>
@@ -163,6 +215,8 @@ export const agentCreated = (agent: Agent) =>
     `• Send <code>@${displayHandle(agent)} your message</code> to ask it something directly.`,
     `• /talk ${displayHandle(agent)} to keep talking to it.`,
     "• Or just talk to your main agent: it hands work to this one when it fits.",
+    "",
+    `Want ${name(agent)} in its own chat? Create a bot in @BotFather and paste its token on the <a href="${agentsUrl()}">Agents page</a>.`,
   ].join("\n");
 
 export const agentRenamed = (agent: Agent) => `✅ Renamed. It's now ${name(agent)} (${handle(agent)}).`;

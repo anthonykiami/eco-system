@@ -1,8 +1,8 @@
-import { Badge, Button, Card, inputClass, Notice, PageHeader } from "@/components/ui";
+import { Badge, Button, buttonClass, Card, inputClass, Notice, PageHeader } from "@/components/ui";
 import { MAX_AGENT_DESCRIPTION_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_SPECIALISTS } from "@/lib/agents/naming";
 import { requireActiveUser } from "@/lib/auth/session";
 import { ensurePrimaryAgent, listAgents } from "@/lib/db/queries";
-import { addAgent, editAgent, removeAgent } from "./actions";
+import { addAgent, connectBot, disconnectBot, editAgent, removeAgent } from "./actions";
 
 const ERRORS: Record<string, string> = {
   invalid: `Names need 1 to ${MAX_AGENT_NAME_LENGTH} characters, with at least one letter or number.`,
@@ -11,12 +11,19 @@ const ERRORS: Record<string, string> = {
   description: `Describe the job in 1 to ${MAX_AGENT_DESCRIPTION_LENGTH.toLocaleString("en-US")} characters.`,
   limit: `You can have up to ${MAX_SPECIALISTS} agents besides your main one. Delete one first.`,
   missing: "That agent no longer exists.",
+  "bot-format": "That doesn't look like a bot token. It's the long code BotFather sends, like 123456789:AAH…",
+  "bot-invalid": "Telegram didn't accept that token. Copy it again from @BotFather (or /token there to get a new one).",
+  "bot-main": "That's your main assistant's bot. Make a new bot in @BotFather for this agent.",
+  "bot-taken": "That bot is already connected to another agent.",
+  "bot-failed": "Couldn't set up the bot. Please try again.",
 };
 
 const SAVED: Record<string, string> = {
   created: "Agent created. If Telegram is connected, it now has its own topic there.",
   updated: "Saved. It applies from the next message.",
-  deleted: "Agent deleted, along with its conversations, tasks and Telegram topic.",
+  deleted: "Agent deleted, along with its conversations and tasks. Its bot (if any) was disconnected.",
+  bot: "Bot connected. Open its chat and tap Start, so it can message you.",
+  unbot: "Bot disconnected. The agent is still reachable through your main assistant.",
 };
 
 export default async function AgentsPage({ searchParams }: PageProps<"/agents">) {
@@ -32,7 +39,7 @@ export default async function AgentsPage({ searchParams }: PageProps<"/agents">)
     <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-4 sm:p-8">
       <PageHeader
         title="Agents"
-        description="Your main agent answers everything and hands work to the others. Each other agent has one job, its own Telegram topic, and can be messaged directly with @name."
+        description="Your main agent answers everything and hands work to the others. Each other agent has one job, can be messaged with @name, and can have its own Telegram bot: its own chat, and its own voice in your group."
       />
       {error && <Notice tone="danger">{error}</Notice>}
       {saved && <Notice tone="success">{saved}</Notice>}
@@ -71,13 +78,64 @@ export default async function AgentsPage({ searchParams }: PageProps<"/agents">)
                 <span className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="flex flex-wrap items-center gap-2 font-medium">
                     {agent.name}
-                    {agent.telegramTopicId !== null && <Badge>Telegram topic</Badge>}
+                    {agent.telegramBotUsername ? <Badge tone="accent">@{agent.telegramBotUsername}</Badge> : <Badge>no own bot</Badge>}
                   </span>
                   <span className="line-clamp-2 text-sm text-muted">{agent.description}</span>
                 </span>
                 <span className="shrink-0 text-sm text-muted group-open:hidden">Edit</span>
                 <span className="hidden shrink-0 text-sm text-muted group-open:inline">Close</span>
               </summary>
+
+              <section className="mt-5 flex flex-col gap-3 border-t border-line pt-5" aria-label="Telegram bot">
+                <h3 className="text-sm font-medium">Its own Telegram bot</h3>
+                {agent.telegramBotUsername ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a
+                      href={`https://t.me/${agent.telegramBotUsername}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={buttonClass("primary", "sm")}
+                    >
+                      Open @{agent.telegramBotUsername}
+                    </a>
+                    <form action={disconnectBot}>
+                      <input type="hidden" name="agentId" value={agent.id} />
+                      <Button type="submit" size="sm" variant="ghost">
+                        Disconnect bot
+                      </Button>
+                    </form>
+                  </div>
+                ) : (
+                  <>
+                    <ol className="list-decimal space-y-0.5 pl-5 text-sm text-muted">
+                      <li>
+                        In Telegram, open{" "}
+                        <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="underline">
+                          @BotFather
+                        </a>{" "}
+                        and send <code>/newbot</code>.
+                      </li>
+                      <li>Name it (e.g. “{agent.name}”) and pick a username ending in “bot”.</li>
+                      <li>Paste the token it gives you here. The app names the bot and sets it up.</li>
+                    </ol>
+                    <form action={connectBot} className="flex flex-wrap gap-2">
+                      <input type="hidden" name="agentId" value={agent.id} />
+                      <input
+                        name="token"
+                        type="password"
+                        autoComplete="off"
+                        placeholder="123456789:AAH…"
+                        aria-label={`Bot token for ${agent.name}`}
+                        required
+                        className={`${inputClass} min-w-0 flex-1`}
+                      />
+                      <Button type="submit" variant="primary">
+                        Connect bot
+                      </Button>
+                    </form>
+                  </>
+                )}
+              </section>
 
               <form action={editAgent} className="mt-5 flex flex-col gap-3 border-t border-line pt-5">
                 <input type="hidden" name="agentId" value={agent.id} />

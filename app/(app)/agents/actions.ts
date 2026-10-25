@@ -11,7 +11,8 @@ import {
 import { requireActiveUser } from "@/lib/auth/session";
 import { createAgent, deleteAgent, getUser, listAgents, updateAgent } from "@/lib/db/queries";
 import type { User } from "@/lib/db/schema";
-import { deleteAgentTopic, renameAgentTopic, syncAgentTopics } from "@/lib/telegram/topics";
+import { BotSetupError, connectAgentBot, disconnectAgentBot, renameAgentBot } from "@/lib/telegram/agent-bots";
+import { deleteAgentTopic, renameAgentTopic } from "@/lib/telegram/topics";
 
 const PATH = "/agents";
 
@@ -29,7 +30,7 @@ function checkFields(name: string, description: string, agents: Awaited<ReturnTy
   if (!description || description.length > MAX_AGENT_DESCRIPTION_LENGTH) redirect(`${PATH}?error=description`);
 }
 
-/** Creates a specialist from a name and a job description; it gets its Telegram topic right away. */
+/** Creates a specialist from a name and a job description. It can be given its own bot afterwards. */
 export async function addAgent(formData: FormData) {
   const session = await requireActiveUser();
   const userId = session.user.id;
@@ -39,9 +40,7 @@ export async function addAgent(formData: FormData) {
   if (agents.filter((a) => a.role === "specialized").length >= MAX_SPECIALISTS) redirect(`${PATH}?error=limit`);
   checkFields(name, description, agents);
 
-  const agent = await createAgent(userId, { name, description, soul: buildSpecialistSoul(name, description) });
-  const telegram = await telegramContext(userId);
-  if (telegram) await syncAgentTopics(telegram, [agent]);
+  await createAgent(userId, { name, description, soul: buildSpecialistSoul(name, description) });
   revalidatePath(PATH);
   redirect(`${PATH}?saved=created`);
 }
@@ -65,7 +64,10 @@ export async function editAgent(formData: FormData) {
     ...(generated ? { soul: buildSpecialistSoul(name, description) } : {}),
   });
   const telegram = await telegramContext(userId);
-  if (telegram && updated && updated.name !== agent.name) await renameAgentTopic(telegram, updated);
+  if (updated && (updated.name !== agent.name || updated.description !== agent.description)) {
+    await renameAgentBot(updated);
+    if (telegram) await renameAgentTopic(telegram, updated);
+  }
   revalidatePath(PATH);
   redirect(`${PATH}?saved=updated`);
 }
@@ -79,9 +81,41 @@ export async function removeAgent(formData: FormData) {
   );
   if (!agent) redirect(`${PATH}?error=missing`);
 
+  await disconnectAgentBot(userId, agent);
   await deleteAgent(userId, agent.id);
   const telegram = await telegramContext(userId);
   if (telegram) await deleteAgentTopic(telegram, agent.telegramTopicId);
   revalidatePath(PATH);
   redirect(`${PATH}?saved=deleted`);
+}
+
+/** The user's own specialist with this id, or a redirect back with an error. */
+async function ownSpecialist(userId: string, agentId: string) {
+  const agent = (await listAgents(userId)).find((a) => a.id === agentId && a.role === "specialized");
+  if (!agent) redirect(`${PATH}?error=missing`);
+  return agent;
+}
+
+/** Gives a specialist its own Telegram bot, from a token the user made in @BotFather. */
+export async function connectBot(formData: FormData) {
+  const session = await requireActiveUser();
+  const agent = await ownSpecialist(session.user.id, field(formData, "agentId"));
+  try {
+    await connectAgentBot(session.user.id, agent, field(formData, "token"));
+  } catch (err) {
+    if (err instanceof BotSetupError) redirect(`${PATH}?error=bot-${err.reason}`);
+    console.error("[agents] couldn't connect a bot", err);
+    redirect(`${PATH}?error=bot-failed`);
+  }
+  revalidatePath(PATH);
+  redirect(`${PATH}?saved=bot`);
+}
+
+/** Takes a specialist's bot away; the agent stays, reachable through the main bot. */
+export async function disconnectBot(formData: FormData) {
+  const session = await requireActiveUser();
+  const agent = await ownSpecialist(session.user.id, field(formData, "agentId"));
+  await disconnectAgentBot(session.user.id, agent);
+  revalidatePath(PATH);
+  redirect(`${PATH}?saved=unbot`);
 }

@@ -2,7 +2,8 @@ import { runAgent } from "@/lib/agents";
 import { BudgetExceededError, RateLimitError, type AgentError } from "@/lib/agents/errors";
 import * as q from "@/lib/db/queries";
 import type { Agent } from "@/lib/db/schema";
-import { TelegramApiError } from "@/lib/telegram/api";
+import { agentBotToken } from "@/lib/telegram/agent-bots";
+import { asBot, TelegramApiError } from "@/lib/telegram/api";
 import { redis } from "@/lib/upstash";
 import type { JobMessage } from "./fanout";
 import { sendTelegramMessage } from "./telegram";
@@ -91,10 +92,11 @@ export async function runScheduledJob({ jobId, userId, scheduledFor }: JobMessag
 }
 
 /**
- * Sends a job's output to Telegram: into the agent's own topic if it has one, otherwise the main
- * chat, where a specialist's result says who it's from. If the user deleted the topic, the result
- * goes to the main chat and the agent gets a new topic on their next message. A failed send is
- * logged, never retried, so the job can't run twice.
+ * Sends a job's output to Telegram: through the agent's own bot if it has one, else into its
+ * topic if it has one (agents made before they got bots), otherwise the main chat, where a
+ * specialist's result says who it's from. If the agent's bot can't reach the user (they never
+ * tapped Start) or the topic is gone, it falls back to the main chat. A failed send is logged,
+ * never retried, so the job can't run twice.
  */
 async function deliver(
   userId: string,
@@ -105,6 +107,15 @@ async function deliver(
 ): Promise<void> {
   const labeled = agent?.role === "specialized" ? `**${agent.name}**\n${text}` : text;
   try {
+    const ownBot = agent && agentBotToken(agent);
+    if (ownBot) {
+      try {
+        return await asBot(ownBot, () => sendTelegramMessage(telegramChatId, text));
+      } catch (err) {
+        console.error(`[jobs/run] agent ${agent.id}'s own bot couldn't deliver job ${jobId}; using the main bot`, err);
+        return await sendTelegramMessage(telegramChatId, labeled);
+      }
+    }
     if (agent?.telegramTopicId == null) return await sendTelegramMessage(telegramChatId, labeled);
     try {
       await sendTelegramMessage(telegramChatId, text, agent.telegramTopicId);

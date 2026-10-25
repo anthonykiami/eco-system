@@ -4,10 +4,18 @@ import { sendHtml, type SendOptions } from "./api";
 import { getActiveAgentId } from "./state";
 
 /**
- * Who the bot is talking to: a linked, active user in their private chat, and the topic the
- * update came from (undefined for the main chat).
+ * Who the bot is talking to: a linked, active user, in their private chat with a bot or in their
+ * linked group, and the topic the update came from (undefined for the main chat).
  */
-export type BotContext = { user: User; chatId: number; threadId?: number };
+export type BotContext = {
+  user: User;
+  chatId: number;
+  threadId?: number;
+  /** Set when the update came to this agent's own bot: everything here goes to that agent. */
+  agent?: Agent;
+  /** True in the user's linked group chat. */
+  group?: boolean;
+};
 
 /** Replies where the user wrote: in the same topic, or the main chat. */
 export function say(c: BotContext, html: string, options: Omit<SendOptions, "threadId"> = {}): Promise<void> {

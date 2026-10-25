@@ -7,7 +7,8 @@ import {
 import { createAgent, deleteAgent, getAgent, updateAgent } from "@/lib/db/queries";
 import type { Agent } from "@/lib/db/schema";
 import { editHtml } from "./api";
-import { deleteAgentTopic, renameAgentTopic, syncAgentTopics } from "./topics";
+import { disconnectAgentBot, renameAgentBot } from "./agent-bots";
+import { deleteAgentTopic, renameAgentTopic } from "./topics";
 import { activeAgent, loadAgents, say, type BotContext } from "./context";
 import { switchTo } from "./conversation";
 import * as msg from "./messages";
@@ -32,7 +33,12 @@ function cardKeyboard(agent: Agent): InlineKeyboard {
   const id = agent.id;
   return {
     inline_keyboard: [
-      [{ text: "💬 Talk to it", callback_data: `at:${id}` }],
+      agent.telegramBotUsername
+        ? [
+            { text: "💬 Open its chat", url: `https://t.me/${agent.telegramBotUsername}` },
+            { text: "Talk here", callback_data: `at:${id}` },
+          ]
+        : [{ text: "💬 Talk to it", callback_data: `at:${id}` }],
       agent.role === "primary"
         ? [{ text: "✏️ Rename", callback_data: `ar:${id}` }]
         : [
@@ -109,6 +115,8 @@ export async function handleAgentButton(
       break;
     case "ay":
       if (agent.role === "primary") break;
+      // Stop its bot sending updates here before the agent is gone.
+      await disconnectAgentBot(c.user.id, agent);
       await deleteAgent(c.user.id, agent.id);
       if ((await getActiveAgentId(c.user.id)) === agent.id) await setActiveAgentId(c.user.id, undefined);
       // Tapped inside the agent's own topic, the message goes with it, so there's nothing to edit.
@@ -175,10 +183,9 @@ export async function continueAgentFlow(c: BotContext, flow: AgentFlow, text: st
       soul: buildSpecialistSoul(flow.name, text),
     });
     await clearFlow(userId);
-    await say(c, msg.agentCreated(agent), {
+    return say(c, msg.agentCreated(agent), {
       keyboard: { inline_keyboard: [[{ text: `💬 Talk to ${agent.name}`, callback_data: `at:${agent.id}` }]] },
     });
-    return syncAgentTopics(c, [...agents, agent]);
   }
 
   const agent = agents.find((a) => a.id === flow.agentId);
@@ -198,7 +205,7 @@ export async function continueAgentFlow(c: BotContext, flow: AgentFlow, text: st
       ...(generated ? { soul: buildSpecialistSoul(text, agent.description!) } : {}),
     });
     await clearFlow(userId);
-    if (updated) await renameAgentTopic(c, updated);
+    if (updated) await Promise.all([renameAgentTopic(c, updated), renameAgentBot(updated)]);
     return say(c, msg.agentRenamed(updated ?? agent));
   }
 

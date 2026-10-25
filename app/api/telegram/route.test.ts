@@ -9,6 +9,8 @@ import { env } from "@/lib/env";
 import { createLinkCode } from "@/lib/telegram/linking";
 import * as msg from "@/lib/telegram/messages";
 import type { TelegramUpdate } from "@/lib/telegram/types";
+import { encryptToken, botWebhookSecret } from "@/lib/telegram/secret-box";
+import { POST as POST_BOT } from "./bot/[botId]/route";
 import { POST } from "./route";
 
 const h = vi.hoisted(() => {
@@ -1097,99 +1099,16 @@ describe("photos and voice messages", () => {
   });
 });
 
-describe("topics and live previews (Threaded Mode)", () => {
-  let nextThreadId = 900;
+describe("live previews (Threaded Mode)", () => {
   beforeEach(() => {
-    h.redis.store.delete("tg:topics-enabled");
-    fetchMock.mockImplementation(async (url) => {
-      if (url.endsWith("/getMe")) return Response.json({ ok: true, result: { has_topics_enabled: true } });
-      if (url.endsWith("/createForumTopic")) {
-        return Response.json({ ok: true, result: { message_thread_id: nextThreadId++, name: "x" } });
-      }
-      return okResponse(url);
-    });
+    h.redis.store.delete("tg:topics-enabled:test");
+    fetchMock.mockImplementation(async (url) =>
+      url.endsWith("/getMe") ? Response.json({ ok: true, result: { has_topics_enabled: true } }) : okResponse(url),
+    );
   });
   afterEach(() => {
     fetchMock.mockImplementation(okResponse);
-    h.redis.store.delete("tg:topics-enabled");
-  });
-
-  const inTopic = (chatId: number, threadId: number, text: string): TelegramUpdate => ({
-    update_id: nextUpdateId++,
-    message: { message_id: 1, chat: { id: chatId, type: "private" }, text, message_thread_id: threadId },
-  });
-  const threadOf = (body: Record<string, unknown>) => body.message_thread_id as number | undefined;
-
-  it("gives each specialist a topic, and a message there goes to that agent in its own conversation", async () => {
-    const chatId = nextChatId++;
-    const user = await seedUser({ telegramChatId: chatId });
-    await q.ensurePrimaryAgent(user.id);
-    // Made on the web: it gets its topic on the next message.
-    const coach = await q.createAgent(user.id, { name: "Coach", soul: "You coach." });
-
-    await post(textUpdate(chatId, "hello"));
-
-    expect(calls("createForumTopic")).toEqual([{ chat_id: chatId, name: "Coach" }]);
-    const threadId = (await q.getAgent(user.id, coach.id))!.telegramTopicId!;
-    expect(threadId).toBeGreaterThanOrEqual(900);
-    expect(sentTexts(chatId)).toContainEqual(expect.stringContaining("🧵 <b>Coach</b> now has its own topic"));
-
-    await post(inTopic(chatId, threadId, "plan my week"));
-
-    const call = runAgentMock.mock.calls.at(-1)![0];
-    const chat = await q.getChat(user.id, call.chatId!);
-    expect(chat).toMatchObject({ agentId: coach.id, telegramTopicId: threadId });
-    const reply = calls("sendMessage").at(-1)!;
-    expect(threadOf(reply)).toBe(threadId);
-    expect(reply.text).toBe("echo: plan my week"); // no name label inside the agent's own topic
-
-    // The main chat keeps its own conversation with the main agent.
-    await post(textUpdate(chatId, "and you?"));
-    const mainChat = await q.getChat(user.id, runAgentMock.mock.calls.at(-1)![0].chatId!);
-    expect(mainChat?.telegramTopicId).toBeNull();
-    expect(calls("createForumTopic")).toHaveLength(1);
-  });
-
-  it("a topic the user made is a fresh conversation with the main agent, and topic notices are ignored", async () => {
-    const chatId = nextChatId++;
-    const user = await seedUser({ telegramChatId: chatId });
-    const primary = await q.ensurePrimaryAgent(user.id);
-
-    await post({
-      update_id: nextUpdateId++,
-      message: { message_id: 2, chat: { id: chatId, type: "private" }, message_thread_id: 55, forum_topic_created: { name: "Lisbon" } },
-    });
-    expect(sentTexts(chatId)).toEqual([]);
-
-    await post(inTopic(chatId, 55, "find flights"));
-    await post(inTopic(chatId, 55, "cheaper ones"));
-    const [first, second] = runAgentMock.mock.calls.map(([input]) => input.chatId);
-    expect(first).toBe(second);
-    expect(await q.getChat(user.id, first!)).toMatchObject({ agentId: primary.id, telegramTopicId: 55 });
-
-    await post(inTopic(chatId, 55, "/new"));
-    expect(threadOf(calls("sendMessage").at(-1)!)).toBe(55);
-    await post(inTopic(chatId, 55, "start over"));
-    expect(runAgentMock.mock.calls.at(-1)![0].chatId).not.toBe(first);
-  });
-
-  it("renames and deletes an agent's topic along with the agent", async () => {
-    const chatId = nextChatId++;
-    const user = await seedUser({ telegramChatId: chatId });
-    await q.ensurePrimaryAgent(user.id);
-    await post(textUpdate(chatId, "/newagent Researcher"));
-    await post(textUpdate(chatId, "Finds and summarizes sources."));
-    const researcher = (await q.listAgents(user.id)).find((a) => a.name === "Researcher")!;
-    expect(researcher.telegramTopicId).not.toBeNull();
-
-    await post(buttonUpdate(chatId, `ar:${researcher.id}`));
-    await post(textUpdate(chatId, "Scout"));
-    expect(calls("editForumTopic")).toEqual([
-      { chat_id: chatId, message_thread_id: researcher.telegramTopicId, name: "Scout" },
-    ]);
-
-    await post(buttonUpdate(chatId, `ay:${researcher.id}`));
-    expect(calls("deleteForumTopic")).toEqual([{ chat_id: chatId, message_thread_id: researcher.telegramTopicId }]);
+    h.redis.store.delete("tg:topics-enabled:test");
   });
 
   it("shows the reply as a live preview while it's written, then sends it", async () => {
@@ -1213,5 +1132,140 @@ describe("topics and live previews (Threaded Mode)", () => {
       draft_id: expect.any(Number),
     });
     expect(lastSent(chatId)).toBe("Your week looks <b>calm</b>.");
+  });
+});
+
+describe("agents' own bots and the group", () => {
+  let nextBotId = 555000111;
+  // Each test's Coach gets its own bot, since a bot can belong to only one agent.
+  let COACH_BOT_ID = "";
+  let COACH_TOKEN = "";
+  /** Bot API calls made with a given bot's token. */
+  const callsVia = (token: string, method: string) =>
+    fetchMock.mock.calls
+      .filter(([url]) => url.includes(`/bot${token}/`) && url.endsWith(`/${method}`))
+      .map(([, init]) => JSON.parse(String(init.body)) as Record<string, unknown>);
+
+  async function seedCoach(userId: string) {
+    COACH_BOT_ID = String(nextBotId++);
+    COACH_TOKEN = `${COACH_BOT_ID}:${"A".repeat(35)}`;
+    await q.ensurePrimaryAgent(userId);
+    const coach = await q.createAgent(userId, { name: "Coach", soul: "You coach.", description: "Fitness" });
+    await q.updateAgent(userId, coach.id, {
+      telegramBotId: COACH_BOT_ID,
+      telegramBotUsername: "coach_test_bot",
+      telegramBotToken: encryptToken(COACH_TOKEN),
+    });
+    return coach;
+  }
+
+  async function postToBot(update: unknown, botId = COACH_BOT_ID, secret: string | null = botWebhookSecret(botId || "0")) {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (secret !== null) headers["x-telegram-bot-api-secret-token"] = secret;
+    const res = await POST_BOT(
+      new Request(`http://localhost/api/telegram/bot/${botId}`, { method: "POST", headers, body: JSON.stringify(update) }),
+      { params: Promise.resolve({ botId }) },
+    );
+    await Promise.all(h.pending.splice(0));
+    return res;
+  }
+
+  const groupUpdate = (groupId: number, fromId: number, text: string, extra: Record<string, unknown> = {}): TelegramUpdate =>
+    ({
+      update_id: nextUpdateId++,
+      message: { message_id: 3, chat: { id: groupId, type: "supergroup" }, from: { id: fromId }, text, ...extra },
+    }) as TelegramUpdate;
+
+  it("an agent's bot answers its owner as that agent, through its own token", async () => {
+    const chatId = nextChatId++;
+    const user = await seedUser({ telegramChatId: chatId });
+    const coach = await seedCoach(user.id);
+
+    await postToBot(textUpdate(chatId, "plan my week"));
+
+    const chat = await q.getChat(user.id, runAgentMock.mock.calls[0][0].chatId!);
+    expect(chat?.agentId).toBe(coach.id);
+    expect(callsVia(COACH_TOKEN, "sendMessage").map((b) => b.text)).toEqual(["echo: plan my week"]);
+    expect(calls("setMyCommands")).toHaveLength(0); // the main bot's menu isn't pushed onto agent bots
+  });
+
+  it("an agent's bot refuses forged calls, other people and disconnected bots", async () => {
+    const ownerChat = nextChatId++;
+    const owner = await seedUser({ telegramChatId: ownerChat });
+    const coach = await seedCoach(owner.id);
+    const strangerChat = nextChatId++;
+    await seedUser({ telegramChatId: strangerChat });
+
+    expect((await postToBot(textUpdate(ownerChat, "hi"), COACH_BOT_ID, "forged")).status).toBe(401);
+    expect((await postToBot(textUpdate(ownerChat, "hi"), COACH_BOT_ID, botWebhookSecret("999999999"))).status).toBe(401);
+
+    await postToBot(textUpdate(strangerChat, "hi"));
+    expect(callsVia(COACH_TOKEN, "sendMessage")).toEqual([
+      expect.objectContaining({ chat_id: strangerChat, text: msg.AGENT_BOT_NOT_YOURS }),
+    ]);
+
+    await q.updateAgent(owner.id, coach.id, { telegramBotId: null, telegramBotToken: null });
+    expect((await postToBot(textUpdate(ownerChat, "hi"))).status).toBe(200);
+    expect(runAgentMock).not.toHaveBeenCalled();
+  });
+
+  it("links a group; there the main agent answers plain messages, and strangers get silence", async () => {
+    const userChat = nextChatId++;
+    const user = await seedUser({ telegramChatId: userChat });
+    await seedCoach(user.id);
+    const groupId = -1000 - nextChatId++;
+
+    await post(groupUpdate(groupId, userChat, "/linkgroup"));
+    expect((await q.getUser(user.id))?.telegramGroupChatId).toBe(String(groupId));
+    expect(lastSent(groupId)).toContain("@coach_test_bot");
+
+    await post(groupUpdate(groupId, userChat, "what's on today?"));
+    expect(lastSent(groupId)).toBe("echo: what's on today?");
+
+    runAgentMock.mockClear();
+    await post(groupUpdate(groupId, 424242, "hello bots"));
+    expect(runAgentMock).not.toHaveBeenCalled();
+
+    // A stranger can't link a group either.
+    const otherGroup = groupId - 1;
+    await post(groupUpdate(otherGroup, 424242, "/linkgroup"));
+    expect(lastSent(otherGroup)).toBe(msg.LINKGROUP_UNKNOWN_USER);
+  });
+
+  it("in the group, a message for an agent's bot is answered by that bot, not the main one", async () => {
+    const userChat = nextChatId++;
+    const user = await seedUser({ telegramChatId: userChat });
+    const coach = await seedCoach(user.id);
+    const groupId = -1000 - nextChatId++;
+    await q.setTelegramGroupChatId(user.id, String(groupId));
+    const text = "@coach_test_bot plan my week";
+    const update = groupUpdate(groupId, userChat, text, { entities: [{ type: "mention", offset: 0, length: 15 }] });
+
+    await post(update); // the main bot sees it too, and stays out of it
+    expect(runAgentMock).not.toHaveBeenCalled();
+
+    await postToBot({ ...update, update_id: nextUpdateId++ });
+    expect(runAgentMock.mock.calls[0][0].message).toBe("plan my week");
+    expect((await q.getChat(user.id, runAgentMock.mock.calls[0][0].chatId!))?.agentId).toBe(coach.id);
+    expect(callsVia(COACH_TOKEN, "sendMessage").at(-1)).toMatchObject({ chat_id: groupId, text: "echo: plan my week" });
+  });
+
+  it("in the group, @name and handed-off work make the agent speak through its own bot", async () => {
+    const userChat = nextChatId++;
+    const user = await seedUser({ telegramChatId: userChat });
+    const coach = await seedCoach(user.id);
+    const groupId = -1000 - nextChatId++;
+    await q.setTelegramGroupChatId(user.id, String(groupId));
+
+    await post(groupUpdate(groupId, userChat, "@coach how many sets?"));
+    expect(callsVia(COACH_TOKEN, "sendMessage").at(-1)).toMatchObject({ chat_id: groupId, text: "echo: how many sets?" });
+
+    runAgentMock.mockImplementation(async ({ chatId: id, onDelegate }) => {
+      onDelegate?.({ id: coach.id, name: coach.name });
+      return { text: "Coach says 3 sets.", chatId: id! };
+    });
+    await post(groupUpdate(groupId, userChat, "ask coach about my plan"));
+    expect(callsVia(COACH_TOKEN, "sendMessage").at(-1)?.text).toContain("asked me to help");
+    expect(lastSent(groupId)).toBe("Coach says 3 sets.");
   });
 });

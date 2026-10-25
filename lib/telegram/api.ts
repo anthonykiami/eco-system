@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { env } from "@/lib/env";
 import { htmlToPlainText } from "./format";
 import { splitTelegramHtml, TELEGRAM_MESSAGE_LIMIT } from "./split";
@@ -18,11 +19,24 @@ export class TelegramApiError extends Error {
   }
 }
 
+/**
+ * Which bot the code is speaking as. The shared main bot by default; an update for an agent's own
+ * bot runs inside asBot(that token), so every reply, button and download goes through that bot.
+ */
+const currentBot = new AsyncLocalStorage<string>();
+
+export const asBot = <T>(token: string, fn: () => T): T => currentBot.run(token, fn);
+
+const botToken = () => currentBot.getStore() ?? env.TELEGRAM_BOT_TOKEN;
+
+/** The numeric id of the bot the code is speaking as (the part of its token before the colon). */
+export const currentBotId = () => botToken().split(":")[0];
+
 export async function callTelegram<T = unknown>(
   method: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+  const res = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -139,7 +153,7 @@ export const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
 export async function downloadFile(fileId: string): Promise<Uint8Array> {
   const file = await callTelegram<{ file_path?: string }>("getFile", { file_id: fileId });
   if (!file.file_path) throw new TelegramApiError("getFile", 400, "file has no path (too big?)");
-  const res = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
+  const res = await fetch(`https://api.telegram.org/file/bot${botToken()}/${file.file_path}`);
   if (!res.ok) throw new TelegramApiError("downloadFile", res.status, res.statusText);
   return new Uint8Array(await res.arrayBuffer());
 }
