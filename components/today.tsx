@@ -67,6 +67,21 @@ function DayList({ label, events, timeZone, now }: { label: string; events: Toda
 export async function TodayView({ userId, timeZone }: { userId: string; timeZone: string }) {
   const now = new Date();
   const today = await loadToday(userId, timeZone, now);
+  if (today.unavailable) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted">
+          Couldn&apos;t reach your Google accounts right now. The service that connects them is having trouble; your
+          calendar and email will be back once it recovers.
+        </p>
+        <form action={refreshToday}>
+          <Button type="submit" size="sm" variant="ghost">
+            Try again
+          </Button>
+        </form>
+      </div>
+    );
+  }
   const todays = today.events.filter((e) => e.day === today.today);
   const tomorrows = today.events.filter((e) => e.day === today.tomorrow);
 

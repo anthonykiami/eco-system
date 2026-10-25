@@ -39,6 +39,8 @@ export type Today = {
   gmailConnected: boolean;
   /** Accounts that couldn't be read, by email or toolkit name. */
   failed: string[];
+  /** True when the connections themselves couldn't be listed (e.g. Composio is down). */
+  unavailable?: boolean;
 };
 
 const CACHE_SECONDS = 120;
@@ -160,7 +162,13 @@ export async function loadToday(userId: string, timeZone: string, now = new Date
   const from = startOfLocalDay(today, timeZone);
   const to = startOfLocalDay(localDate(new Date(from.getTime() + 60 * 3_600_000), timeZone), timeZone);
 
-  const accounts = await listConnectedAccounts(userId);
+  let accounts: Awaited<ReturnType<typeof listConnectedAccounts>>;
+  try {
+    accounts = await listConnectedAccounts(userId);
+  } catch (err) {
+    console.error(`[today] couldn't list connections for user ${userId}`, err);
+    return { today, tomorrow, events: [], emails: [], calendarConnected: false, gmailConnected: false, failed: [], unavailable: true };
+  }
   const calendars = accounts.get("GOOGLECALENDAR") ?? [];
   const inboxes = accounts.get("GMAIL") ?? [];
   // Name the account on each item only when there's more than one to tell apart.

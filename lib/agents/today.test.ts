@@ -119,6 +119,14 @@ describe("loadToday", () => {
     expect(mocks.set).not.toHaveBeenCalled();
   });
 
+  it("reports the connections as unavailable instead of failing when they can't be listed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.accounts.mockRejectedValue(new Error("500 Failed to fetch API key information from DB"));
+
+    expect(await loadToday("user-1", NY, NOW)).toMatchObject({ unavailable: true, events: [], emails: [] });
+    expect(mocks.set).not.toHaveBeenCalled();
+  });
+
   it("uses the cache for the same day, and says when nothing is connected", async () => {
     mocks.get.mockResolvedValueOnce({ today: "2026-10-24", events: [], emails: [], failed: [] });
     expect(await loadToday("user-1", NY, NOW)).toMatchObject({ today: "2026-10-24" });
