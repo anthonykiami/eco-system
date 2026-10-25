@@ -29,6 +29,13 @@
       "when": 1792886720240,
       "tag": "0003_telegram_topics",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792891539275,
+      "tag": "0004_task_run_chats",
+      "breakpoints": true
     }
   ]
 }

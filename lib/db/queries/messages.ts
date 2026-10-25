@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { messages, type Message, type MessageRole } from "@/lib/db/schema";
+import { messages, type Chat, type Message, type MessageRole } from "@/lib/db/schema";
 import { getChat } from "./chats";
 import { NotFoundError } from "./errors";
 
@@ -47,4 +47,29 @@ export async function deleteMessage(userId: string, messageId: string): Promise<
     .where(and(eq(messages.userId, userId), eq(messages.id, messageId)))
     .returning({ id: messages.id });
   return rows.length > 0;
+}
+
+/** How many recent messages listRecentConversations looks through to find distinct chats. */
+const RECENT_SCAN = 300;
+
+/** The user's chats with the newest activity, each with its latest message, newest first. */
+export async function listRecentConversations(
+  userId: string,
+  { limit = 5 }: { limit?: number } = {},
+): Promise<{ chat: Chat; lastMessage: Message }[]> {
+  const recent = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.userId, userId))
+    .orderBy(desc(messages.createdAt))
+    .limit(RECENT_SCAN);
+  const latestByChat = new Map<string, Message>();
+  for (const message of recent) {
+    if (!latestByChat.has(message.chatId)) latestByChat.set(message.chatId, message);
+    if (latestByChat.size === limit) break;
+  }
+  const found = await Promise.all(
+    [...latestByChat.values()].map(async (lastMessage) => ({ chat: await getChat(userId, lastMessage.chatId), lastMessage })),
+  );
+  return found.flatMap(({ chat, lastMessage }) => (chat ? [{ chat, lastMessage }] : []));
 }

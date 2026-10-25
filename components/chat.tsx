@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { startNewChat } from "@/app/chat-actions";
+import { startNewChat } from "@/app/(app)/chat-actions";
 
 export type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
 
@@ -70,14 +70,22 @@ export function Chat({ initialMessages, initialChatId, agentName }: Props) {
   }
 
   return (
-    <div className="flex flex-1 flex-col">
-      <header className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
-        <h1 className="text-sm font-medium">{agentName}</h1>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">
+            {agentName.slice(0, 1)}
+          </span>
+          <div>
+            <h1 className="text-sm font-semibold">{agentName}</h1>
+            <p className="text-xs text-muted">Your main agent · hands work to your other agents</p>
+          </div>
+        </div>
         <button
           type="button"
           onClick={onNewChat}
           disabled={isStartingNew || pending}
-          className="text-sm text-neutral-500 underline disabled:opacity-50"
+          className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm transition hover:bg-surface-muted disabled:opacity-50"
         >
           New chat
         </button>
@@ -86,7 +94,7 @@ export function Chat({ initialMessages, initialChatId, agentName }: Props) {
       <div className="flex-1 overflow-y-auto px-4">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 py-6">
           {messages.length === 0 && !pending && (
-            <p className="py-12 text-center text-neutral-500">
+            <p className="py-12 text-center text-muted">
               Ask me anything, or tell me something to remember.
             </p>
           )}
@@ -97,10 +105,10 @@ export function Chat({ initialMessages, initialChatId, agentName }: Props) {
               className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
             >
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-2 whitespace-pre-wrap ${
+                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap ${
                   m.role === "user"
-                    ? "bg-foreground text-background"
-                    : "bg-neutral-100 dark:bg-neutral-900"
+                    ? "rounded-br-md bg-accent text-accent-foreground"
+                    : "rounded-bl-md border border-line bg-surface"
                 }`}
               >
                 {m.content}
@@ -110,12 +118,12 @@ export function Chat({ initialMessages, initialChatId, agentName }: Props) {
 
           {pending && (
             <div className="flex justify-start">
-              <div className="rounded-2xl bg-neutral-100 px-4 py-3 dark:bg-neutral-900">
+              <div className="rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3">
                 <span className="flex gap-1" aria-label="Thinking">
                   {[0, 150, 300].map((delay) => (
                     <span
                       key={delay}
-                      className="h-2 w-2 animate-bounce rounded-full bg-neutral-400"
+                      className="h-2 w-2 animate-bounce rounded-full bg-muted"
                       style={{ animationDelay: `${delay}ms` }}
                     />
                   ))}
@@ -125,7 +133,7 @@ export function Chat({ initialMessages, initialChatId, agentName }: Props) {
           )}
 
           {error && (
-            <p role="alert" className="text-center text-sm text-red-500">
+            <p role="alert" className="text-center text-sm text-danger">
               {error}
             </p>
           )}
@@ -134,7 +142,7 @@ export function Chat({ initialMessages, initialChatId, agentName }: Props) {
         </div>
       </div>
 
-      <div className="border-t border-neutral-200 px-4 py-4 dark:border-neutral-800">
+      <div className="border-t border-line bg-surface px-4 py-4">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -156,12 +164,12 @@ export function Chat({ initialMessages, initialChatId, agentName }: Props) {
             rows={1}
             placeholder="Message your assistant…"
             aria-label="Message"
-            className="max-h-40 flex-1 resize-none rounded-xl border border-neutral-300 bg-transparent px-4 py-3 outline-none focus:border-neutral-500 dark:border-neutral-700"
+            className="max-h-40 flex-1 resize-none rounded-xl border border-line bg-background px-4 py-3 outline-none transition focus:border-accent"
           />
           <button
             type="submit"
             disabled={pending || !input.trim()}
-            className="rounded-xl bg-foreground px-4 py-3 text-background disabled:opacity-40"
+            className="rounded-xl bg-accent px-4 py-3 font-medium text-accent-foreground transition hover:opacity-90 disabled:opacity-40"
           >
             Send
           </button>

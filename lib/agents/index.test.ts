@@ -276,11 +276,16 @@ describe("a run", () => {
     expect(await q.getUsage(userId, q.currentMonth())).toMatchObject({ inputTokens: 50, outputTokens: 19 });
   });
 
-  it("scheduled runs start a new chat", async () => {
+  it("scheduled runs start a new chat, marked as a task run, which web turns never continue", async () => {
     const { userId } = await seedUser("scheduled");
     const a = await runAgent({ userId, message: "brief", channel: "scheduled" });
     const b = await runAgent({ userId, message: "brief", channel: "scheduled" });
     expect(a.chatId).not.toBe(b.chatId);
+    expect((await q.getChat(userId, b.chatId))?.fromTask).toBe(true);
+
+    const web = await runAgent({ userId, message: "hi", channel: "web" });
+    expect([a.chatId, b.chatId]).not.toContain(web.chatId);
+    expect((await q.getChat(userId, web.chatId))?.fromTask).toBe(false);
   });
 
   it("still records tokens spent when the model fails partway", async () => {

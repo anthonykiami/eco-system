@@ -8,9 +8,9 @@ export default async function WaitlistPage() {
 
   return (
     <main className="flex flex-1 items-center justify-center p-8">
-      <div className="flex max-w-md flex-col items-center gap-4 text-center">
+      <div className="flex max-w-md flex-col items-center gap-4 rounded-2xl border border-line bg-surface p-8 text-center">
         <h1 className="text-2xl font-semibold">You&apos;re on the waitlist</h1>
-        <p className="text-neutral-500">
+        <p className="text-muted">
           Thanks for signing up{session.user.email ? ` as ${session.user.email}` : ""}. We&apos;re
           letting people in gradually and will email you as soon as your account is ready.
         </p>

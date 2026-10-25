@@ -133,6 +133,7 @@ async function resolveChatAndAgent(
   if (!agent) throw new NotFoundError("Agent", agentId!);
 
   const input = { agentId: agent.id, channel: toChatChannel(channel) };
-  const chat = channel === "scheduled" ? await createChat(userId, input) : await getOrCreateChat(userId, input);
+  const chat =
+    channel === "scheduled" ? await createChat(userId, { ...input, fromTask: true }) : await getOrCreateChat(userId, input);
   return { chat, agent };
 }

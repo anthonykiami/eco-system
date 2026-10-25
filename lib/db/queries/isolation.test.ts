@@ -80,6 +80,12 @@ describe("per-user isolation in lib/db/queries", () => {
       expect(await q.deleteChat(b.userId, topicChat.id)).toBe(true);
     });
 
+    it("messages: recent conversations are only the caller's", async () => {
+      const recent = await q.listRecentConversations(a.userId, { limit: 10 });
+      expect(recent.map((r) => r.chat.id)).toEqual([a.chat.id]);
+      expect(recent[0].lastMessage.id).toBe(a.message.id);
+    });
+
     it("messages", async () => {
       expect(await q.getMessage(a.userId, b.message.id)).toBeUndefined();
       expect(await q.listMessages(a.userId, b.chat.id)).toEqual([]);

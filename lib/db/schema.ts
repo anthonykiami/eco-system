@@ -127,6 +127,8 @@ export const chats = pgTable(
     channel: chatChannel("channel").notNull(),
     /** The Telegram topic this conversation happens in; null for the main chat and the web. */
     telegramTopicId: integer("telegram_topic_id"),
+    /** Made by a scheduled task's run (saved as a web chat), not a conversation the user had. */
+    fromTask: boolean("from_task").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [

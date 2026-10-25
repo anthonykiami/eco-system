@@ -4,12 +4,17 @@ import { chats, type Chat, type ChatChannel } from "@/lib/db/schema";
 import { getAgent } from "./agents";
 import { NotFoundError } from "./errors";
 
-export type NewChatInput = { agentId: string; channel: ChatChannel; telegramTopicId?: number | null };
+export type NewChatInput = {
+  agentId: string;
+  channel: ChatChannel;
+  telegramTopicId?: number | null;
+  fromTask?: boolean;
+};
 
 /** `telegramTopicId: null` means chats outside any Telegram topic; omitted means any. */
 export async function listChats(
   userId: string,
-  filter: { agentId?: string; channel?: ChatChannel; telegramTopicId?: number | null } = {},
+  filter: { agentId?: string; channel?: ChatChannel; telegramTopicId?: number | null; fromTask?: boolean } = {},
 ): Promise<Chat[]> {
   return db
     .select()
@@ -24,6 +29,7 @@ export async function listChats(
           : filter.telegramTopicId !== undefined
             ? eq(chats.telegramTopicId, filter.telegramTopicId)
             : undefined,
+        filter.fromTask !== undefined ? eq(chats.fromTask, filter.fromTask) : undefined,
       ),
     )
     .orderBy(desc(chats.createdAt));
@@ -49,11 +55,11 @@ export async function createChat(userId: string, input: NewChatInput): Promise<C
 }
 
 /**
- * Returns the most recent chat for this agent + channel (+ Telegram topic, none if omitted),
- * creating one if none exists.
+ * Returns the most recent conversation for this agent + channel (+ Telegram topic, none if
+ * omitted), creating one if none exists. Chats made by task runs are never picked.
  */
 export async function getOrCreateChat(userId: string, input: NewChatInput): Promise<Chat> {
-  const scoped = { ...input, telegramTopicId: input.telegramTopicId ?? null };
+  const scoped = { ...input, telegramTopicId: input.telegramTopicId ?? null, fromTask: false };
   const [latest] = await listChats(userId, scoped);
   return latest ?? createChat(userId, scoped);
 }

@@ -1,26 +1,69 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens. Pages use the Tailwind names (bg-surface, text-muted, border-line, bg-accent…),
+ * so light and dark mode only change here.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f7f8;
+  --foreground: #18181b;
+  --surface: #ffffff;
+  --surface-muted: #f1f1f3;
+  --line: #e4e4e7;
+  --muted: #71717a;
+  --accent: #5b5bd6;
+  --accent-soft: #ededfc;
+  --accent-foreground: #ffffff;
+  --success: #15803d;
+  --success-soft: #e8f6ec;
+  --warning: #b45309;
+  --warning-soft: #fdf3e2;
+  --danger: #dc2626;
+  --danger-soft: #fdecec;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b0b0d;
+    --foreground: #ededef;
+    --surface: #141417;
+    --surface-muted: #1c1c20;
+    --line: #27272c;
+    --muted: #9b9ba3;
+    --accent: #8b8bf5;
+    --accent-soft: #23234a;
+    --accent-foreground: #0b0b0d;
+    --success: #4ade80;
+    --success-soft: #12301d;
+    --warning: #fbbf24;
+    --warning-soft: #33270d;
+    --danger: #f87171;
+    --danger-soft: #3a1515;
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
 }

@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { users, type User, type UserStatus } from "@/lib/db/schema";
+import { usage, users, type Usage, type User, type UserStatus } from "@/lib/db/schema";
 
 /**
  * ADMIN ONLY — cross-user queries. Callers must verify the session belongs to an
@@ -27,4 +27,9 @@ export async function adminSetUserStatus(
 export async function adminSetUserPlan(targetUserId: string, plan: string): Promise<User | undefined> {
   const [row] = await db.update(users).set({ plan }).where(eq(users.id, targetUserId)).returning();
   return row;
+}
+
+/** Every user's usage row for a month ("YYYY-MM"); users with no activity have none. */
+export async function adminListUsage(month: string): Promise<Usage[]> {
+  return db.select().from(usage).where(eq(usage.month, month));
 }
