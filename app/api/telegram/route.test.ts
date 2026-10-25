@@ -1099,6 +1099,18 @@ describe("photos and voice messages", () => {
   });
 });
 
+describe("slow turns", () => {
+  it("says the turn took too long instead of a generic error", async () => {
+    const chatId = nextChatId++;
+    await seedUser({ telegramChatId: chatId });
+    runAgentMock.mockRejectedValue(Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }));
+
+    await post(textUpdate(chatId, "news brief please"));
+
+    expect(lastSent(chatId)).toBe(msg.TOO_SLOW);
+  });
+});
+
 describe("pausing an agent's tasks from Telegram", () => {
   it("the agent card pauses and resumes its tasks", async () => {
     const chatId = nextChatId++;

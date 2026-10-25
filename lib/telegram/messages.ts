@@ -113,6 +113,9 @@ export const voiceProblem = (reason: "unavailable" | "too_long" | "daily_limit" 
 
 export const GENERIC_ERROR = "Sorry, something went wrong. Please try again in a moment.";
 
+export const TOO_SLOW =
+  "Sorry, that took too long and I had to stop. Try asking for something narrower, or try again in a moment.";
+
 export const CANCELLED = "OK, cancelled.";
 
 export const NOTHING_TO_CANCEL = "Nothing to cancel.";

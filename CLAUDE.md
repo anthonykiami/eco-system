@@ -34,7 +34,7 @@ This is a multi-tenant product sold to other people. It has two interfaces: the 
 
 ## Deployment notes
 
-- **Long-running routes:** the Vercel default timeout is 10s. Any route that calls `runAgent` sets `export const maxDuration = 60;` in its own `route.ts`. Don't add a shared `vercel.json`.
+- **Long-running routes:** any route that calls `runAgent` sets `export const maxDuration` in its own `route.ts`. The web chat waits for its reply (60s, 45s turns); the Telegram webhooks and the job worker run the turn in the background and allow 300s (240s turns, see `lib/agents/primary`). Don't add a shared `vercel.json`.
 - **Scheduling:** Vercel Cron on the Hobby plan only runs about once a day, so it can't drive the heartbeat. Use a **QStash schedule** pointed at `${APP_URL}/api/cron/heartbeat` instead, and verify the QStash signature with `qstashReceiver` from `lib/upstash.ts`.
 - **Waitlist:** production runs with `WAITLIST_MODE=true`, so new sign-ups land on `/waitlist` until an admin activates them at `/admin`. Local development runs with it `false`.
 - **CI:** `.github/workflows/ci.yml` runs typecheck, lint and test on every push and PR. It never touches the real database — the DB tests use PGlite.

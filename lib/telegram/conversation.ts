@@ -29,6 +29,9 @@ export function talkKeyboard(agents: Agent[], activeId: string): InlineKeyboard 
 /** What came with the text: photos, or that the text is a transcribed voice message. */
 export type Extras = { images?: AgentImage[]; voice?: boolean };
 
+/** A turn that ran out of time (the AI SDK aborts it with a TimeoutError). */
+const isTimeout = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+
 /** How much of a transcript is echoed back, so the user can tell they were heard right. */
 const HEARD_ECHO_LENGTH = 300;
 
@@ -174,8 +177,9 @@ async function replyAs(
     });
     reply = label + markdownToTelegramHtml(result.text);
   } catch (err) {
-    if (!isAgentError(err)) throw err;
-    reply = escapeHtml(err.userMessage);
+    if (isTimeout(err)) reply = msg.TOO_SLOW;
+    else if (isAgentError(err)) reply = escapeHtml(err.userMessage);
+    else throw err;
   } finally {
     stopTyping();
     await draft?.stop();

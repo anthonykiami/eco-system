@@ -8,8 +8,8 @@ import { botWebhookSecret } from "@/lib/telegram/secret-box";
 import { telegramUpdateSchema } from "@/lib/telegram/types";
 import { redis } from "@/lib/upstash";
 
-// Covers the agent turn that runs in after().
-export const maxDuration = 60;
+// Covers the agent turn that runs in after(), which may take up to 240s (lib/agents/primary).
+export const maxDuration = 300;
 
 const DEDUPE_TTL_SECONDS = 24 * 60 * 60;
 
