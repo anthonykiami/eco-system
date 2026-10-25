@@ -74,7 +74,7 @@ export const HELP = [
   "Just send a message (text, a photo or a voice message): your main agent answers, and hands work to your other agents when it fits.",
   "<code>@name your message</code> sends one message straight to a specific agent. Replying to an agent's message does the same.",
   "/talk — keep talking to one agent · /main — back to the main agent",
-  "Each of your other agents also has its own topic in this chat. Topics you create yourself are fresh conversations with your main agent.",
+  "Each of your other agents also has its own topic in this chat: open it to talk to that agent alone.",
   "/new — start a fresh conversation",
   "",
   "<b>Agents</b>",
