@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadToday, senderName, startOfLocalDay } from "./today";
+import { inGoogleAccount, loadToday, senderName, startOfLocalDay } from "./today";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -29,6 +29,20 @@ describe("helpers", () => {
     expect(startOfLocalDay("2026-10-25", "Asia/Tokyo").toISOString()).toBe("2026-10-24T15:00:00.000Z");
   });
 
+  it("points Google links at the connected account, not the browser's first one", () => {
+    expect(inGoogleAccount("https://www.google.com/calendar/event?eid=abc", "me@upenn.edu")).toBe(
+      "https://www.google.com/calendar/event?eid=abc&authuser=me%40upenn.edu",
+    );
+    expect(inGoogleAccount("https://mail.google.com/mail/u/0/#inbox/123", "me@gmail.com")).toBe(
+      "https://mail.google.com/mail/u/me@gmail.com/#inbox/123",
+    );
+    expect(inGoogleAccount("https://mail.google.com/mail/?shva=1#inbox/1", "me@gmail.com")).toBe(
+      "https://mail.google.com/mail/?shva=1&authuser=me%40gmail.com#inbox/1",
+    );
+    expect(inGoogleAccount("https://x.test/a", undefined)).toBe("https://x.test/a");
+    expect(inGoogleAccount(undefined, "me@gmail.com")).toBeUndefined();
+  });
+
   it("shows senders by name", () => {
     expect(senderName('"Jane Doe" <jane@x.com>')).toBe("Jane Doe");
     expect(senderName("Penn Registrar <noreply@upenn.edu>")).toBe("Penn Registrar");
@@ -51,7 +65,13 @@ describe("loadToday", () => {
       if (slug === "GOOGLECALENDAR") {
         expect(args).toMatchObject({ time_min: "2026-10-24T04:00:00.000Z", time_max: "2026-10-26T04:00:00.000Z" });
         return calendar([
-          { title: "Lab", start: "2026-10-24T14:00:00-04:00", end: "2026-10-24T15:00:00-04:00", calendar: "Penn" },
+          {
+            title: "Lab",
+            start: "2026-10-24T14:00:00-04:00",
+            end: "2026-10-24T15:00:00-04:00",
+            calendar: "Penn",
+            display_url: "https://www.google.com/calendar/event?eid=lab",
+          },
           { title: "Brunch", start: "2026-10-25T11:00:00-04:00", end: "2026-10-25T12:00:00-04:00" },
           { title: "Fall break", start: "2026-10-24", end: "2026-10-25", is_all_day: true },
           { title: "Too late", start: "2026-10-26T09:00:00-04:00" },
@@ -71,12 +91,13 @@ describe("loadToday", () => {
       ["Lab", "2026-10-24"],
       ["Brunch", "2026-10-25"],
     ]);
-    expect(today.events[1].account).toBeUndefined(); // only one calendar
+    expect(today.events[1].account).toBeUndefined(); // only one calendar, so no label…
+    expect(today.events[1].url).toBe("https://www.google.com/calendar/event?eid=lab&authuser=me%40upenn.edu"); // …but its link names it
     expect(today.emails).toEqual([
       expect.objectContaining({ from: "Boss", subject: "Q4", account: "me@work.com" }),
       expect.objectContaining({ from: "Ann", account: "me@gmail.com" }),
     ]);
-    expect(mocks.set).toHaveBeenCalledWith("today:user-1", today, { ex: 120 });
+    expect(mocks.set).toHaveBeenCalledWith("today:v2:user-1", today, { ex: 120 });
   });
 
   it("keeps going when one account fails, says which, and doesn't cache the gap", async () => {

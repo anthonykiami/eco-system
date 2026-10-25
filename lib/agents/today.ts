@@ -42,7 +42,7 @@ export type Today = {
 };
 
 const CACHE_SECONDS = 120;
-const cacheKey = (userId: string) => `today:${userId}`;
+const cacheKey = (userId: string) => `today:v2:${userId}`;
 const MAX_EMAILS = 8;
 /** Unread inbox mail from the last two days: what's likely to still need attention. */
 const EMAIL_QUERY = "is:unread in:inbox newer_than:2d";
@@ -76,6 +76,25 @@ export function startOfLocalDay(day: string, timeZone: string): Date {
   return new Date(guess.getTime() - offsetMs(guess, timeZone));
 }
 
+/**
+ * Makes a Google link open in the account it came from. Without this, Google uses whichever
+ * account is signed in first in the browser, which may not be the connected one.
+ */
+export function inGoogleAccount(url: string | undefined, email: string | undefined): string | undefined {
+  if (!url || !email) return url;
+  try {
+    const link = new URL(url);
+    if (link.hostname === "mail.google.com" && /\/mail\/u\/[^/]+/.test(link.pathname)) {
+      link.pathname = link.pathname.replace(/\/mail\/u\/[^/]+/, `/mail/u/${email}`);
+    } else {
+      link.searchParams.set("authuser", email);
+    }
+    return link.toString();
+  } catch {
+    return url;
+  }
+}
+
 /** "Jane Doe <jane@x.com>" → "Jane Doe"; a bare address stays as is. */
 export function senderName(sender: string): string {
   const match = /^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/.exec(sender);
@@ -104,7 +123,7 @@ async function readCalendar(userId: string, account: ConnectedAccount, from: Dat
         allDay,
         day: allDay ? e.start.slice(0, 10) : localDate(new Date(e.start), timeZone),
         calendar: e.calendar,
-        url: e.display_url,
+        url: inGoogleAccount(e.display_url, account.email),
         account: label,
       },
     ];
@@ -125,7 +144,7 @@ async function readInbox(userId: string, account: ConnectedAccount, label?: stri
       from: senderName(m.sender ?? "Unknown sender"),
       subject: m.subject?.trim() || "(No subject)",
       at: m.messageTimestamp ?? new Date(0).toISOString(),
-      url: m.display_url,
+      url: inGoogleAccount(m.display_url, account.email),
       account: label,
     }),
   );
